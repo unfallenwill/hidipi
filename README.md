@@ -110,6 +110,7 @@ hidpi autostart status
 
 安装会保存安装前的显示设置，创建 `~/Library/LaunchAgents/local.hidpi-cli.agent.plist`，
 并立即在后台启用 HiDPI。之后每次**登录桌面**自动启动，无需保留终端。
+后台进程不会出现在 Dock：长驻运行时工具会把自己降级为 UI 元素（accessory）进程。
 它不在 FileVault 解锁界面或用户登录前运行。
 
 物理模式配置绑定显示器 UUID 和安装时核验的尺寸、刷新率；登录时最多等候 60 秒。

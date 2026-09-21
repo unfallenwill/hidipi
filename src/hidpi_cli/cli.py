@@ -34,6 +34,10 @@ class Rect(C.Structure):
     _fields_ = [("origin", Pair), ("size", Pair)]
 
 
+class ProcessSerialNumber(C.Structure):
+    _fields_ = [("high", U), ("low", U)]
+
+
 class HiDPIError(Exception):
     pass
 
@@ -404,7 +408,25 @@ def stop_signals():
             signal.signal(sig, handler)
 
 
+def hide_dock_icon():
+    # Registering with WindowServer (virtual display creation, display modes)
+    # makes a launchd-run Python appear in the Dock. Demote to a UI element:
+    # no Dock icon, no menu bar, display work unaffected. Must run after the
+    # trigger, or the later registration re-promotes the process. Cosmetic on
+    # failure, so errors are ignored.
+    try:
+        hiservices = C.CDLL('/System/Library/Frameworks/ApplicationServices'
+                            '.framework/Frameworks/HIServices.framework/HIServices')
+        transform = bind(hiservices, 'TransformProcessType', I,
+                         C.POINTER(ProcessSerialNumber), U)
+    except (OSError, AttributeError):
+        return
+    psn = ProcessSerialNumber(0, 2)  # kCurrentProcess
+    transform(C.byref(psn), 4)  # kProcessTransformToUIElement
+
+
 def preview(mac, display, expected, seconds, keep, stopping, mode_check=mode_matches):
+    hide_dock_icon()
     deadline = time.monotonic() + seconds
     interactive = sys.stdin.isatty()
     if keep:

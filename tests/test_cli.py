@@ -127,6 +127,19 @@ class Selection(unittest.TestCase):
         self.assertFalse(cli.mode_matches(mode(scale=2), mode()))
 
 
+class DockIcon(unittest.TestCase):
+    def test_long_running_preview_demotes_dock_icon(self):
+        mac = FakeMac()
+        with patch.object(cli, 'hide_dock_icon') as hide, patch.object(cli.sys, 'stdin') as stdin:
+            stdin.isatty.return_value = False
+            with contextlib.redirect_stdout(io.StringIO()):
+                cli.preview(mac, 3, mode(scale=2, hz=50), 5, True, {'stop': True})
+        hide.assert_called_once()
+
+    def test_hide_dock_icon_never_raises(self):
+        cli.hide_dock_icon()
+
+
 class Rollback(unittest.TestCase):
     def run_enable(self, mac, directory):
         args = argparse.Namespace(display=None, size=(1920, 1080), refresh=None,

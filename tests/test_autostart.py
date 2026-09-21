@@ -1,6 +1,7 @@
 import argparse
 import contextlib
 import io
+import json
 from pathlib import Path
 import plistlib
 import subprocess
@@ -53,6 +54,39 @@ class AutostartTests(unittest.TestCase):
                     autostart.install(args)
             self.assertFalse(path.exists())
             self.assertEqual(len(list(args.backup_dir.glob('*.json'))), 1)
+
+    def test_unknown_refresh_plist_runs_without_invalid_refresh_argument(self):
+        data = autostart.make_plist(Path('/python'), Path('/config'), Path('/backups'),
+            snapshot()['displays'][0]['uuid'], mode(scale=2, hz=0), Path('/backup.json'))
+        argv = data['ProgramArguments'][4:]
+        self.assertNotIn('--refresh', argv)
+        with patch('sys.argv', ['hidpi', *argv]), patch.object(cli, 'Mac'), patch.object(
+                autostart, 'wait_for_display', return_value=True), patch.object(cli, 'enable_hidpi') as enable:
+            self.assertEqual(cli.main(), 0)
+        self.assertIsNone(enable.call_args.args[1].refresh)
+
+    def test_uninstall_stops_service_even_when_backup_is_unusable(self):
+        for contents in (None, '{broken', '{"schema": 99}'):
+            with self.subTest(contents=contents), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                backup = root / 'original.json'
+                if contents is not None:
+                    backup.write_text(contents)
+                path = root / 'agent.plist'
+                path.write_bytes(plistlib.dumps(autostart.make_virtual_plist(
+                    Path('/python'), root, root, mode(scale=2), backup)))
+                state.save_settings({'enabled': True})
+                with patch.object(autostart, 'agent_path', return_value=path), patch.object(
+                        autostart, 'launchctl', return_value=subprocess.CompletedProcess([], 0, '', '')) as launch, patch.object(
+                        cli, 'Mac') as mac, contextlib.redirect_stdout(io.StringIO()), self.assertRaisesRegex(
+                        cli.HiDPIError, '自启动已卸载，但无法恢复'):
+                    autostart.uninstall(argparse.Namespace(backup_dir=root))
+                launch.assert_any_call('bootout', autostart.service())
+                mac.assert_not_called()
+                self.assertFalse(path.exists())
+                self.assertFalse(json.loads((state.config_dir() / 'autostart.json').read_text())['enabled'])
+                if contents is not None:
+                    self.assertEqual(backup.read_text(), contents)
 
     def test_dry_run_does_not_write_backup_or_install(self):
         with tempfile.TemporaryDirectory() as folder:

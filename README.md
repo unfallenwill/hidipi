@@ -113,7 +113,7 @@ hidpi autostart status
 后台进程不会出现在 Dock：长驻运行时工具会把自己降级为 UI 元素（accessory）进程。
 它不在 FileVault 解锁界面或用户登录前运行。
 
-物理模式配置绑定显示器 UUID 和安装时核验的尺寸、刷新率；登录时最多等候 60 秒。
+物理模式配置绑定显示器 UUID 和安装时核验的尺寸、刷新率；系统未报告刷新率时不指定刷新率参数。登录时最多等候 60 秒。
 虚拟模式保存创建参数，不依赖实体显示器 UUID。
 多屏时安装命令可增加 `--display ID`，安装后不依赖可能变化的数字 ID。
 不需要 sudo。登录启动直接使用执行安装命令时的 Python 环境，以 `~/.config/hidpi-cli` 为工作目录，
@@ -131,6 +131,7 @@ hidpi autostart uninstall
 
 卸载后可以继续用 `restore` 恢复任意历史备份。手动运行 `enable` 或 `restore` 前，
 先卸载后台服务，避免两个进程同时修改显示器。
+如果安装前备份丢失或损坏，卸载仍会停止服务并移除启动项，但会报错说明无法恢复安装前设置；可使用其他有效备份手动恢复。
 正常运行日志位于 `~/.config/hidpi-cli/logs/autostart.log`，错误位于同目录的 `autostart-error.log`。
 `status` 会显示服务状态和最近日志；“已加载”不等于显示模式切换成功，请查看日志中的核验结果。
 
@@ -148,6 +149,7 @@ hidpi autostart uninstall
   崩溃、断电或强制结束不能执行 Python 清理，不能承诺百分之百自动回退；重新运行 `restore` 可从磁盘备份恢复。
 - 恢复时如果原显示器未连接或原模式已不可用，会明确失败并保留备份；连接原屏幕后再试。
 - 不同时运行多个修改命令。先在运行中的 `enable` 终端按 Ctrl+C，然后执行独立恢复。
+- 修改命令共用用户配置目录中的 `operation.lock`，不受备份目录或 `TMPDIR` 影响；运行期间不要删除锁文件。
 - JSON 是显示模式备份，不是整个 macOS 配置备份；不备份应用窗口位置、HDR、色彩配置、亮度或显示器 OSD 设置。
 
 自定义备份目录放在子命令前：
@@ -170,9 +172,20 @@ hidpi --backup-dir /path/to/backups backup
 
 ## 验证
 
+默认测试使用模拟的显示与 Dock 接口，不切换屏幕或操作真实自启动项；原生接口测试默认跳过，可在沙箱中运行默认测试：
+
 ```sh
 uv run python -m unittest discover -s tests -v
 ```
+
+真实 Dock 接口的冒烟测试需在已登录桌面的本机终端、沙箱外显式运行：
+
+```sh
+HIDPI_NATIVE_TESTS=1 uv run python -m unittest discover -s tests -p test_native.py -v
+```
+
+该测试在独立子进程中调用 `TransformProcessType`，检查调用能否正常结束，不切换显示模式。
+受限环境中的系统接口可能直接 `abort()`，Python 无法捕获；子进程隔离可避免整个测试运行器退出，但系统仍可能生成崩溃报告。不要在沙箱中启用此测试。
 
 2026-09-21 在本机 M4 Mac mini / macOS 27.0 上完成：
 

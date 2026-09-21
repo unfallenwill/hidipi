@@ -47,9 +47,10 @@ def add_parser(sub):
 
 
 def make_plist(python, workdir, backup_dir, identity, mode, backup):
+    refresh_args = ['--refresh', str(mode['hz'])] if mode['hz'] else []
     return dict(Label=LABEL, ProgramArguments=[str(python), '-u', '-m', 'hidpi_cli',
         '--backup-dir', str(backup_dir), 'enable', '--display-uuid', identity,
-        '--size', f'{mode["width"]}x{mode["height"]}', '--refresh', str(mode['hz']),
+        '--size', f'{mode["width"]}x{mode["height"]}', *refresh_args,
         '--wait-display', '60', '--keep'], WorkingDirectory=str(workdir),
         RunAtLoad=True, KeepAlive=False, LimitLoadToSessionType='Aqua',
         ExitTimeOut=20, ProcessType='Interactive',
@@ -179,8 +180,12 @@ def uninstall(args):
         return
     data = read_agent(path)
     backup = Path(data['EnvironmentVariables']['HIDPI_INSTALL_BACKUP'])
-    # Validate the persistent recovery path before stopping anything.
-    saved = cli.validate_backup(json.loads(backup.read_text()))
+    # Recovery failure must not prevent stopping/removing the service.
+    recovery_error = None
+    try:
+        saved = cli.validate_backup(json.loads(backup.read_text()))
+    except (cli.HiDPIError, OSError, ValueError) as error:
+        recovery_error = error
     result = launchctl('print', service(), checked=False)
     if result.returncode == 0:
         launchctl('bootout', service())
@@ -192,7 +197,7 @@ def uninstall(args):
         settings = json.loads(settings_path.read_text())
         settings['enabled'] = False
         state.save_settings(settings)
-    print('已移除登录自启动；正在恢复安装前设置。', flush=True)
+    print('已移除登录自启动；正在等待后台进程退出。', flush=True)
     # bootout can return before the process finishes its SIGTERM cleanup.
     deadline = time.monotonic() + 22
     while True:
@@ -205,6 +210,9 @@ def uninstall(args):
                 raise cli.HiDPIError(f'服务停止超时。备份保留在 {backup}；请稍后手动 restore。')
             time.sleep(0.2)
     try:
+        if recovery_error is not None:
+            raise cli.HiDPIError(f'自启动已卸载，但无法恢复安装前设置：备份 {backup} '
+                                 f'不可用（{recovery_error}）。请使用其他有效备份手动 restore。')
         mac = cli.Mac()
         virtual_mode = data['EnvironmentVariables'].get('HIDPI_MODE') == 'virtual'
         if virtual_mode:

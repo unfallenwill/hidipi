@@ -4,10 +4,12 @@ import copy
 import io
 import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from hidpi_cli import cli
 
@@ -101,8 +103,33 @@ class Backups(unittest.TestCase):
             self.assertFalse(list(Path(folder).glob('.backup-*')))
 
     def test_single_instance_across_backup_directories(self):
-        with tempfile.TemporaryDirectory() as folder, patch.object(cli.tempfile, 'gettempdir', return_value=folder), cli.single_instance(Path('/unused/a')):
+        with tempfile.TemporaryDirectory() as folder, patch.object(cli.state, 'config_dir', return_value=Path(folder)), cli.single_instance(Path('/unused/a')):
             with self.assertRaises(cli.HiDPIError):
+                with cli.single_instance(Path('/unused/b')):
+                    pass
+
+    def test_single_instance_across_processes_with_different_tmpdir(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            other_tmp = root / 'other-tmp'
+            other_tmp.mkdir()
+            env = dict(os.environ, HOME=folder, TMPDIR=str(other_tmp),
+                       PYTHONPATH=str(Path(cli.__file__).resolve().parents[1]))
+            code = '''
+from pathlib import Path
+from hidpi_cli import cli
+try:
+    with cli.single_instance(Path('/unused/b')):
+        raise SystemExit(1)
+except cli.HiDPIError:
+    pass
+'''
+            with patch.object(cli.state, 'config_dir', return_value=root / '.config' / 'hidpi-cli'):
+                with cli.single_instance(Path('/unused/a')):
+                    result = subprocess.run([sys.executable, '-c', code], env=env,
+                                            capture_output=True, text=True, timeout=10)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                # Releasing the lock permits the next operation.
                 with cli.single_instance(Path('/unused/b')):
                     pass
 
@@ -136,8 +163,35 @@ class DockIcon(unittest.TestCase):
                 cli.preview(mac, 3, mode(scale=2, hz=50), 5, True, {'stop': True})
         hide.assert_called_once()
 
-    def test_hide_dock_icon_never_raises(self):
-        cli.hide_dock_icon()
+    def test_hide_dock_icon_requests_ui_element_for_current_process(self):
+        library = MagicMock()
+        calls = []
+        def transform(pointer, kind):
+            psn = cli.C.cast(pointer, cli.C.POINTER(cli.ProcessSerialNumber)).contents
+            calls.append((psn.high, psn.low, kind))
+            return 0
+        library.TransformProcessType.side_effect = transform
+        with patch.object(cli.C, 'CDLL', return_value=library):
+            cli.hide_dock_icon()
+        self.assertEqual(calls, [(0, 2, 4)])
+        self.assertEqual(library.TransformProcessType.restype, cli.I)
+        self.assertEqual(library.TransformProcessType.argtypes,
+                         (cli.C.POINTER(cli.ProcessSerialNumber), cli.U))
+
+    def test_hide_dock_icon_tolerates_missing_library(self):
+        with patch.object(cli.C, 'CDLL', side_effect=OSError('unavailable')):
+            cli.hide_dock_icon()
+
+    def test_hide_dock_icon_tolerates_missing_symbol(self):
+        with patch.object(cli.C, 'CDLL', return_value=object()):
+            cli.hide_dock_icon()
+
+    def test_hide_dock_icon_tolerates_native_error_return(self):
+        library = MagicMock()
+        library.TransformProcessType.return_value = -50
+        with patch.object(cli.C, 'CDLL', return_value=library):
+            cli.hide_dock_icon()
+        library.TransformProcessType.assert_called_once()
 
 
 class Rollback(unittest.TestCase):

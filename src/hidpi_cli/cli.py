@@ -361,7 +361,9 @@ def write_backup(snapshot, directory):
 @contextlib.contextmanager
 def single_instance(directory):
     # One per-user lock even when callers choose different backup directories.
-    lock_path = Path(tempfile.gettempdir()) / f'hidpi-cli-{os.getuid()}.lock'
+    root = state.config_dir()
+    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    lock_path = root / 'operation.lock'
     fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     with os.fdopen(fd, 'a+') as lock:
         try:
@@ -413,7 +415,9 @@ def hide_dock_icon():
     # makes a launchd-run Python appear in the Dock. Demote to a UI element:
     # no Dock icon, no menu bar, display work unaffected. Must run after the
     # trigger, or the later registration re-promotes the process. Cosmetic on
-    # failure, so errors are ignored.
+    # failure, so loading errors and native error returns are ignored.
+    # Native aborts cannot be caught by Python: this requires desktop access.
+    # Unit tests mock this API; native smoke tests run in a separate process.
     try:
         hiservices = C.CDLL('/System/Library/Frameworks/ApplicationServices'
                             '.framework/Frameworks/HIServices.framework/HIServices')

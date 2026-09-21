@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from hidpi_cli import autostart, backup as backups, errors, runtime, virtual
+from hidipi import autostart, backup as backups, errors, runtime, virtual
 from test_cli import mode, snapshot
 
 
@@ -93,6 +93,7 @@ class VirtualTests(unittest.TestCase):
         data = autostart.make_virtual_plist(Path('/tools/python'), Path('/config'),
             Path('/backups'), mode(scale=2), Path('/backups/original.json'))
         argv = data['ProgramArguments']
+        self.assertEqual(argv[1:4], ['-u', '-m', 'hidipi'])
         self.assertIn('virtual', argv)
         self.assertIn('--keep', argv)
         self.assertNotIn('--display-uuid', argv)

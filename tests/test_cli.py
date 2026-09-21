@@ -11,7 +11,7 @@ import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
-from hidpi_cli import backup as backups, cli, display, errors, macos, modes, runtime, state
+from hidipi import backup as backups, cli, display, errors, macos, modes, runtime, state
 
 
 def mode(width=1920, height=1080, scale=1, hz=60, mode_id=1):
@@ -117,7 +117,7 @@ class Backups(unittest.TestCase):
                        PYTHONPATH=str(Path(cli.__file__).resolve().parents[1]))
             code = '''
 from pathlib import Path
-from hidpi_cli import errors, runtime
+from hidipi import errors, runtime
 try:
     with runtime.single_instance(Path('/unused/b')):
         raise SystemExit(1)

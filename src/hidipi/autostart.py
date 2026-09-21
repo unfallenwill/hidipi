@@ -11,6 +11,7 @@ import tempfile
 
 from . import backup as backups, errors, macos, modes as display_modes, runtime, state
 
+# Keep the installed service identity so hidipi can manage existing agents.
 LABEL = 'local.hidpi-cli.agent'
 
 
@@ -48,7 +49,7 @@ def add_parser(sub):
 
 def make_plist(python, workdir, backup_dir, identity, mode, backup):
     refresh_args = ['--refresh', str(mode['hz'])] if mode['hz'] else []
-    return dict(Label=LABEL, ProgramArguments=[str(python), '-u', '-m', 'hidpi_cli',
+    return dict(Label=LABEL, ProgramArguments=[str(python), '-u', '-m', 'hidipi',
         '--backup-dir', str(backup_dir), 'enable', '--display-uuid', identity,
         '--size', f'{mode["width"]}x{mode["height"]}', *refresh_args,
         '--wait-display', '60', '--keep'], WorkingDirectory=str(workdir),
@@ -61,7 +62,7 @@ def make_plist(python, workdir, backup_dir, identity, mode, backup):
 
 def make_virtual_plist(python, workdir, backup_dir, mode, backup):
     data = make_plist(python, workdir, backup_dir, None, mode, backup)
-    data['ProgramArguments'] = [str(python), '-u', '-m', 'hidpi_cli',
+    data['ProgramArguments'] = [str(python), '-u', '-m', 'hidipi',
         '--backup-dir', str(backup_dir), 'virtual', '--size', f'{mode["width"]}x{mode["height"]}',
         '--refresh', str(mode['hz']), '--keep']
     data['EnvironmentVariables']['HIDPI_MODE'] = 'virtual'
@@ -77,7 +78,7 @@ def write_agent(path, data):
     """Publish a complete plist without replacing an existing installation."""
     payload = plistlib.dumps(data)
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temporary = tempfile.mkstemp(prefix='.hidpi-agent-', dir=str(path.parent))
+    fd, temporary = tempfile.mkstemp(prefix='.hidipi-agent-', dir=str(path.parent))
     try:
         with os.fdopen(fd, 'wb') as out:
             out.write(payload)
@@ -157,7 +158,7 @@ def _install(args):
         write_agent(path, data)
     # The lifecycle lock stays held; only release the display lock for the child.
     start_agent(path, settings)
-    print(f'已安装并提交启动：{path}\n运行 hidpi autostart status 查看实际运行情况。', flush=True)
+    print(f'已安装并提交启动：{path}\n运行 hidipi autostart status 查看实际运行情况。', flush=True)
 
 
 def read_agent(path):

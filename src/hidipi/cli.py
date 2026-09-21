@@ -1,4 +1,4 @@
-"""Command-line parsing and dispatch for HiDPI CLI."""
+"""Command-line parsing and dispatch for hidipi."""
 import argparse
 import json
 import math

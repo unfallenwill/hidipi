@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from hidpi_cli import cli, macos, state
+from hidipi import cli, macos, state
 
 
 class StateTests(unittest.TestCase):
@@ -28,7 +28,7 @@ class StateTests(unittest.TestCase):
 
     def test_paths_command_does_not_access_displays(self):
         output = io.StringIO()
-        with patch('sys.argv', ['hidpi', 'paths']), patch.object(
+        with patch('sys.argv', ['hidipi', 'paths']), patch.object(
                 macos, 'Mac', side_effect=AssertionError('read-only paths')), contextlib.redirect_stdout(output):
             self.assertEqual(cli.main(), 0)
         self.assertIn(str(state.backup_dir()), output.getvalue())

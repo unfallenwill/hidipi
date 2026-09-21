@@ -9,7 +9,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from hidpi_cli import autostart, backup, errors, macos, runtime, state
+from hidipi import autostart, backup, errors, macos, runtime, state
 from test_cli import FakeMac, mode, snapshot
 
 
@@ -82,7 +82,7 @@ class LifecycleTests(unittest.TestCase):
                 autostart.install(self.args)
         launch.assert_not_called()
         self.assertFalse(self.path.exists())
-        self.assertFalse(list(self.path.parent.glob('.hidpi-agent-*')))
+        self.assertFalse(list(self.path.parent.glob('.hidipi-agent-*')))
         self.assertTrue(Path(state.load_settings()['install_backup']).exists())
 
     def test_atomic_publish_refuses_existing_file(self):
@@ -172,3 +172,18 @@ class LifecycleTests(unittest.TestCase):
             autostart.status()
         self.assertIn('恢复未完成', output.getvalue())
         self.assertIn('/saved.json', output.getvalue())
+
+    def test_renamed_project_can_uninstall_legacy_agent(self):
+        saved = self.prepare_agent()
+        data = plistlib.loads(self.path.read_bytes())
+        data['Label'] = 'local.hidpi-cli.agent'
+        data['ProgramArguments'][3] = 'hidpi_cli'
+        self.path.write_bytes(plistlib.dumps(data))
+        mac = FakeMac()
+        with patch.object(autostart, 'launchctl', return_value=self.result()) as launch, patch.object(
+                macos, 'Mac', return_value=mac):
+            autostart.uninstall(self.args)
+        launch.assert_any_call('bootout', autostart.service())
+        self.assertFalse(self.path.exists())
+        self.assertTrue(saved.exists())
+        self.assertEqual(mac.restorations, [snapshot()])

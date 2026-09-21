@@ -9,7 +9,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from hidpi_cli import autostart, backup as backups, cli, display, errors, macos, state
+from hidipi import autostart, backup as backups, cli, display, errors, macos, state
 from test_cli import FakeMac, mode, snapshot
 
 
@@ -27,6 +27,7 @@ class AutostartTests(unittest.TestCase):
             mode(scale=2, hz=50), Path('/backups/original.json'))
         data = plistlib.loads(plistlib.dumps(data))
         argv = data['ProgramArguments']
+        self.assertEqual(argv[1:4], ['-u', '-m', 'hidipi'])
         self.assertEqual(argv[0], '/project with space/.venv/bin/python')
         self.assertIn('--display-uuid', argv)
         self.assertNotIn('--display', argv)
@@ -61,7 +62,7 @@ class AutostartTests(unittest.TestCase):
             snapshot()['displays'][0]['uuid'], mode(scale=2, hz=0), Path('/backup.json'))
         argv = data['ProgramArguments'][4:]
         self.assertNotIn('--refresh', argv)
-        with patch('sys.argv', ['hidpi', *argv]), patch.object(macos, 'Mac'), patch.object(
+        with patch('sys.argv', ['hidipi', *argv]), patch.object(macos, 'Mac'), patch.object(
                 display, 'wait_for_display', return_value=True), patch.object(display, 'enable_hidpi') as enable:
             self.assertEqual(cli.main(), 0)
         self.assertIsNone(enable.call_args.args[1].refresh)

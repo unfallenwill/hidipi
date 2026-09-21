@@ -1,7 +1,10 @@
-# HiDPI CLI
+# hidipi
 
 免费的本机 macOS 命令行工具，Python 标准库实现，使用 `ctypes` 调用系统显示接口。
 不依赖 BetterDisplay，不修改 EDID 或系统配置文件，不需要 sudo、关闭 SIP 或付费软件。
+
+项目、发行包及 Python 模块名统一为 **hidipi**，主命令为 `hidipi`，也支持 `python -m hidipi`。
+原命令 `hidpi` 保留为兼容别名。HiDPI 是显示技术名称，继续使用原拼写。
 
 ## 安装与目录
 
@@ -11,9 +14,9 @@
 uv tool install .
 ```
 
-安装后在任意目录都可以运行 `hidpi`。uv 会把程序复制到独立工具环境，运行时不需要源码目录。
-如果提示找不到 `hidpi`，确保 uv 输出的工具 bin 目录（通常 `~/.local/bin`）在 PATH 中。
-开发时仍可在仓库运行 `uv run hidpi ...`，两种方式默认共用同一份用户数据：
+安装后在任意目录都可以运行 `hidipi`。uv 会把程序复制到独立工具环境，运行时不需要源码目录。
+如果提示找不到 `hidipi`，确保 uv 输出的工具 bin 目录（通常 `~/.local/bin`）在 PATH 中。
+开发时仍可在仓库运行 `uv run hidipi ...`，两种方式默认共用同一份用户数据：
 
 ```text
 ~/.config/hidpi-cli/
@@ -22,18 +25,33 @@ uv tool install .
 └── logs/               # 自启动日志和错误日志
 ```
 
-`hidpi paths` 显示实际目录。数据路径不依赖调用时的工作目录，也不在工具虚拟环境内，
+`hidipi paths` 显示实际目录。数据路径不依赖调用时的工作目录，也不在工具虚拟环境内，
 重新安装工具不会主动删除这些数据。`autostart.json` 是安装状态记录；修改自启动参数请卸载后重新安装，
 单独编辑该 JSON 不会更改已经加载的 LaunchAgent。
+
+从旧版 `hidpi-cli` 升级时，先停止旧服务并卸载旧工具，避免 `hidpi` 命令别名冲突，再安装新版：
+
+```sh
+hidpi autostart uninstall
+uv tool uninstall hidpi-cli
+uv tool install .
+hidipi paths
+```
+
+之后按原来的尺寸及实体/虚拟模式参数重新运行 `hidipi autostart install`。
+停止唯一虚拟屏幕会影响远程桌面连接，请在可重新连接或本机操作时升级。
+旧 LaunchAgent 的 Python 环境和 `-m hidpi_cli` 入口不会被源码改名自动更新。
+为兼容已有安装，数据与锁目录 `~/.config/hidpi-cli`、服务标识 `local.hidpi-cli.agent`、
+`HIDPI_INSTALL_BACKUP` / `HIDPI_MODE` 字段及 `HIDPI_NATIVE_TESTS` 测试开关保持不变；不自动迁移或删除历史备份。
 
 ## 使用
 
 在已登录 macOS 桌面的终端运行：
 
 ```sh
-hidpi list
-hidpi backup
-hidpi enable --size 1920x1080
+hidipi list
+hidipi backup
+hidipi enable --size 1920x1080
 ```
 
 `enable` 每次先写入并回读核验备份，再切换系统已有的 HiDPI 模式。
@@ -42,22 +60,22 @@ hidpi enable --size 1920x1080
 
 ```sh
 # 跳过预览倒计时，直到 Ctrl+C 才恢复
-hidpi enable --size 1920x1080 --keep
+hidipi enable --size 1920x1080 --keep
 
 # 仅当系统存在对应的 60 Hz HiDPI 模式时才切换
-hidpi enable --size 1920x1080 --refresh 60
+hidipi enable --size 1920x1080 --refresh 60
 
 # 多显示器时，使用 list 返回的 ID
-hidpi enable --display 3 --size 1920x1080
+hidipi enable --display 3 --size 1920x1080
 
 # 非交互测试：5 秒后自动恢复
-hidpi enable --size 1920x1080 --seconds 5
+hidipi enable --size 1920x1080 --seconds 5
 
 # 查看包括普通 DPI 在内的模式
-hidpi list --all
+hidipi list --all
 
 # 用控制台输出的真实备份路径替换下方示例
-hidpi restore ~/.config/hidpi-cli/backups/display-YYYYMMDD-HHMMSS-xxxxxxxx.json
+hidipi restore ~/.config/hidpi-cli/backups/display-YYYYMMDD-HHMMSS-xxxxxxxx.json
 ```
 
 可以省略 `--size`，默认寻找当前界面逻辑尺寸对应的 HiDPI 模式。
@@ -69,16 +87,16 @@ Apple Silicon Mac 可以创建独立的 HiDPI 虚拟屏幕，无需 HDMI 显示�
 
 ```sh
 # 前台预览 20 秒，之后自动移除；输入 y 可保留
-hidpi virtual --size 1920x1080
+hidipi virtual --size 1920x1080
 
 # 持续运行，Ctrl+C 移除虚拟屏幕并恢复仍连接的原屏幕
-hidpi virtual --size 1920x1080 --keep
+hidipi virtual --size 1920x1080 --keep
 
 # 使用虚拟屏幕作为登录自启动模式
 # 如果已经安装了物理模式的自启动，先卸载它
-hidpi autostart uninstall
-hidpi autostart install --virtual --size 1920x1080
-hidpi autostart status
+hidipi autostart uninstall
+hidipi autostart install --virtual --size 1920x1080
+hidipi autostart status
 ```
 
 逻辑尺寸 `1920x1080` 对应 `3840x2160` 渲染，默认请求 60 Hz。
@@ -90,7 +108,7 @@ hidpi autostart status
 只记入元数据，不把它易变化的 ID 和模式当作硬件恢复。退出时释放虚拟屏幕；原实体屏幕
 若已拔出，保留其备份，待接回后可手动 `restore`。
 
-通过 `hidpi autostart uninstall` 可停止后台虚拟屏幕、取消自启动，并恢复仍连接的原屏幕。
+通过 `hidipi autostart uninstall` 可停止后台虚拟屏幕、取消自启动，并恢复仍连接的原屏幕。
 **停止唯一虚拟屏幕时，远程会话可能短暂重排、改变分辨率或断开。**
 
 虚拟功能使用 macOS 私有 `CGVirtualDisplay` 接口，目前支持原生 ARM64 Python。
@@ -104,8 +122,8 @@ hidpi autostart status
 安装为工具后，在任意目录运行一次：
 
 ```sh
-hidpi autostart install --size 1920x1080
-hidpi autostart status
+hidipi autostart install --size 1920x1080
+hidipi autostart status
 ```
 
 安装会保存安装前的显示设置，创建 `~/Library/LaunchAgents/local.hidpi-cli.agent.plist`，
@@ -117,22 +135,22 @@ hidpi autostart status
 虚拟模式保存创建参数，不依赖实体显示器 UUID。
 多屏时安装命令可增加 `--display ID`，安装后不依赖可能变化的数字 ID。
 不需要 sudo。登录启动直接使用执行安装命令时的 Python 环境，以 `~/.config/hidpi-cli` 为工作目录，
-不会运行 uv 或联网安装依赖。通过 `hidpi autostart install` 配置时，使用 uv tool 的独立环境，
-可以移动源码仓库；如果使用 `uv run hidpi autostart install`，则仍依赖项目 `.venv`。
-升级/卸载工具前，请先 `hidpi autostart uninstall`；重新安装工具后，再安装自启动。
+不会运行 uv 或联网安装依赖。通过 `hidipi autostart install` 配置时，使用 uv tool 的独立环境，
+可以移动源码仓库；如果使用 `uv run hidipi autostart install`，则仍依赖项目 `.venv`。
+升级/卸载工具前，请先 `hidipi autostart uninstall`；重新安装工具后，再安装自启动。
 
 ```sh
 # 只查看将生成的配置，不写入启动项
-hidpi autostart install --size 1920x1080 --dry-run
+hidipi autostart install --size 1920x1080 --dry-run
 
 # 停止后台进程、取消以后的自启动、恢复安装前设置，保留所有备份
-hidpi autostart uninstall
+hidipi autostart uninstall
 ```
 
 卸载后可以继续用 `restore` 恢复任意历史备份。手动运行 `enable` 或 `restore` 前，
 先卸载后台服务，避免两个进程同时修改显示器。
 如果安装前备份丢失或损坏，卸载仍会停止服务并移除启动项，但会报错说明无法恢复安装前设置；可使用其他有效备份手动恢复。
-卸载会保存待恢复记录。修复备份或重新连接原显示器后，可再次运行 `hidpi autostart uninstall` 完成恢复，
+卸载会保存待恢复记录。修复备份或重新连接原显示器后，可再次运行 `hidipi autostart uninstall` 完成恢复，
 即使启动项已删除也能重试；待恢复记录完成前会拒绝新的安装，避免覆盖原恢复信息。
 安装提交启动失败或超时时会保留启动项和备份，因为后台进程可能已经启动。请先查看 `status`，
 再通过 `uninstall` 清理后重新安装。停止服务失败时也会保留启动项，供下一次卸载重试。
@@ -159,7 +177,7 @@ hidpi autostart uninstall
 自定义备份目录放在子命令前：
 
 ```sh
-hidpi --backup-dir /path/to/backups backup
+hidipi --backup-dir /path/to/backups backup
 ```
 
 ## 能力与限制

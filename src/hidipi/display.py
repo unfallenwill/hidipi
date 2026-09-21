@@ -36,7 +36,7 @@ def enable_hidpi(mac, args):
         print(f'注意：刷新率将从 {target["mode"]["hz"]:g} Hz 变为 {wanted["hz"]:g} Hz。')
     backup = backups.write_backup(original, args.backup_dir)
     print(f'已备份并回读核验：{backup.resolve()}', flush=True)
-    print(f'独立恢复命令：hidpi restore {backup.resolve()}', flush=True)
+    print(f'独立恢复命令：hidipi restore {backup.resolve()}', flush=True)
     # Install handlers before modifying anything. Signals set a flag instead
     # of interrupting a CoreGraphics transaction or the finally restoration.
     with runtime.stop_signals() as stopping:
@@ -52,7 +52,7 @@ def enable_hidpi(mac, args):
                 mac.restore(original)
             except Exception as error:
                 print(f'自动恢复未完成：{error}\n备份保留在：{backup.resolve()}\n'
-                      f'请重新连接原显示器后运行：hidpi restore {backup.resolve()}', file=sys.stderr)
+                      f'请重新连接原显示器后运行：hidipi restore {backup.resolve()}', file=sys.stderr)
                 raise
             print('已恢复并核验原始分辨率、刷新率、镜像与排列。', flush=True)
 

@@ -132,6 +132,10 @@ hidpi autostart uninstall
 卸载后可以继续用 `restore` 恢复任意历史备份。手动运行 `enable` 或 `restore` 前，
 先卸载后台服务，避免两个进程同时修改显示器。
 如果安装前备份丢失或损坏，卸载仍会停止服务并移除启动项，但会报错说明无法恢复安装前设置；可使用其他有效备份手动恢复。
+卸载会保存待恢复记录。修复备份或重新连接原显示器后，可再次运行 `hidpi autostart uninstall` 完成恢复，
+即使启动项已删除也能重试；待恢复记录完成前会拒绝新的安装，避免覆盖原恢复信息。
+安装提交启动失败或超时时会保留启动项和备份，因为后台进程可能已经启动。请先查看 `status`，
+再通过 `uninstall` 清理后重新安装。停止服务失败时也会保留启动项，供下一次卸载重试。
 正常运行日志位于 `~/.config/hidpi-cli/logs/autostart.log`，错误位于同目录的 `autostart-error.log`。
 `status` 会显示服务状态和最近日志；“已加载”不等于显示模式切换成功，请查看日志中的核验结果。
 
@@ -186,6 +190,33 @@ HIDPI_NATIVE_TESTS=1 uv run python -m unittest discover -s tests -p test_native.
 
 该测试在独立子进程中调用 `TransformProcessType`，检查调用能否正常结束，不切换显示模式。
 受限环境中的系统接口可能直接 `abort()`，Python 无法捕获；子进程隔离可避免整个测试运行器退出，但系统仍可能生成崩溃报告。不要在沙箱中启用此测试。
+
+## 代码结构与故障恢复
+
+- `cli.py`：参数解析、命令分发和退出码。
+- `macos.py`：CoreGraphics、Objective-C、NSScreen 与 Dock 原生接口；导入模块时不加载系统框架。
+- `backup.py`：备份校验、原子写入及回读核验。
+- `modes.py` / `errors.py`：共享模式规则、尺寸解析与异常类型。
+- `runtime.py`：进程互斥、信号处理及预览生命周期。
+- `display.py` / `virtual.py`：实体屏幕与虚拟屏幕业务流程。
+- `autostart.py` / `state.py`：LaunchAgent 生命周期与持久化操作记录。
+
+底层模块不导入 CLI。安装与卸载共用独立的 `autostart.lock`，在后台进程启动前释放显示操作锁，
+同时保持安装/卸载互斥。启动项以完整临时文件发布，拒绝覆盖已有配置。
+
+`autostart.json` 的 `phase` 记录操作进度，不代表显示模式已核验成功：
+
+| 阶段 | 含义与重试方式 |
+| --- | --- |
+| `start_pending` | 已记录安装参数，尚未确认启动提交完成；检查 `status`，有启动项时先卸载再安装 |
+| `submitted` | launchctl 已接受启动请求；实际显示状态需查看日志 |
+| `stop_pending` | 正在停止服务，失败后保留配置，可重试卸载 |
+| `restore_pending` | 正在移除启动项或恢复显示设置；保留恢复路径，可重试卸载 |
+| `uninstalled` | 启动项已移除，恢复步骤已完成 |
+
+自动化测试包含模拟启动超时、停止超时、文件写入失败和恢复失败后的重试。
+
+## 历史实机验证
 
 2026-09-21 在本机 M4 Mac mini / macOS 27.0 上完成：
 

@@ -16,7 +16,7 @@ class NativeDesktopTests(unittest.TestCase):
         env = dict(os.environ, PYTHONPATH=str(source))
         result = subprocess.run(
             [sys.executable, '-c',
-             'from hidpi_cli.cli import hide_dock_icon; hide_dock_icon()'],
+             'from hidpi_cli.macos import hide_dock_icon; hide_dock_icon()'],
             env=env, capture_output=True, text=True, timeout=15,
         )
         self.assertEqual(result.returncode, 0,

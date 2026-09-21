@@ -13,6 +13,17 @@ def backup_dir():
     return config_dir() / 'backups'
 
 
+def load_settings():
+    path = config_dir() / 'autostart.json'
+    try:
+        data = json.loads(path.read_text())
+    except FileNotFoundError:
+        return {}
+    if not isinstance(data, dict):
+        raise ValueError('自启动记录必须是 JSON 对象。')
+    return data
+
+
 def save_settings(data):
     root = config_dir()
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -24,6 +35,11 @@ def save_settings(data):
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, root / 'autostart.json')
+        directory_fd = os.open(str(root), os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)

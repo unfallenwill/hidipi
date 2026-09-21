@@ -11,7 +11,7 @@ import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
-from hidpi_cli import cli
+from hidpi_cli import backup as backups, cli, display, errors, macos, modes, runtime, state
 
 
 def mode(width=1920, height=1080, scale=1, hz=60, mode_id=1):
@@ -50,7 +50,7 @@ class FakeMac:
         if self.fail_switch:
             # Simulate partial application followed by an OS error.
             self.actual = expected
-            raise cli.HiDPIError('simulated transaction failure')
+            raise errors.HiDPIError('simulated transaction failure')
         if not self.ignore_switch:
             self.actual = expected
 
@@ -59,7 +59,7 @@ class FakeMac:
 
     def wait_until(self, predicate, error, timeout):
         if not predicate():
-            raise cli.HiDPIError(error)
+            raise errors.HiDPIError(error)
 
     def restore(self, saved):
         self.restorations.append(saved)
@@ -69,8 +69,8 @@ class FakeMac:
 class Backups(unittest.TestCase):
     def test_backup_is_durable_unique_private_and_roundtrips(self):
         with tempfile.TemporaryDirectory() as folder:
-            first = cli.write_backup(snapshot(), Path(folder))
-            second = cli.write_backup(snapshot(), Path(folder))
+            first = backups.write_backup(snapshot(), Path(folder))
+            second = backups.write_backup(snapshot(), Path(folder))
             self.assertNotEqual(first, second)
             self.assertEqual(json.loads(first.read_text()), snapshot())
             self.assertEqual(first.stat().st_mode & 0o777, 0o600)
@@ -90,22 +90,22 @@ class Backups(unittest.TestCase):
         for corrupt in corruptions:
             saved = snapshot()
             corrupt(saved)
-            with self.subTest(saved=saved), self.assertRaises(cli.HiDPIError):
-                cli.validate_backup(saved)
+            with self.subTest(saved=saved), self.assertRaises(errors.HiDPIError):
+                backups.validate_backup(saved)
 
     def test_atomic_rename_failure_leaves_existing_backups(self):
         with tempfile.TemporaryDirectory() as folder:
-            old = cli.write_backup(snapshot(), Path(folder))
-            with patch.object(cli.os, 'replace', side_effect=OSError('disk error')):
+            old = backups.write_backup(snapshot(), Path(folder))
+            with patch.object(backups.os, 'replace', side_effect=OSError('disk error')):
                 with self.assertRaises(OSError):
-                    cli.write_backup(snapshot(), Path(folder))
+                    backups.write_backup(snapshot(), Path(folder))
             self.assertEqual(json.loads(old.read_text()), snapshot())
             self.assertFalse(list(Path(folder).glob('.backup-*')))
 
     def test_single_instance_across_backup_directories(self):
-        with tempfile.TemporaryDirectory() as folder, patch.object(cli.state, 'config_dir', return_value=Path(folder)), cli.single_instance(Path('/unused/a')):
-            with self.assertRaises(cli.HiDPIError):
-                with cli.single_instance(Path('/unused/b')):
+        with tempfile.TemporaryDirectory() as folder, patch.object(state, 'config_dir', return_value=Path(folder)), runtime.single_instance(Path('/unused/a')):
+            with self.assertRaises(errors.HiDPIError):
+                with runtime.single_instance(Path('/unused/b')):
                     pass
 
     def test_single_instance_across_processes_with_different_tmpdir(self):
@@ -117,20 +117,20 @@ class Backups(unittest.TestCase):
                        PYTHONPATH=str(Path(cli.__file__).resolve().parents[1]))
             code = '''
 from pathlib import Path
-from hidpi_cli import cli
+from hidpi_cli import errors, runtime
 try:
-    with cli.single_instance(Path('/unused/b')):
+    with runtime.single_instance(Path('/unused/b')):
         raise SystemExit(1)
-except cli.HiDPIError:
+except errors.HiDPIError:
     pass
 '''
-            with patch.object(cli.state, 'config_dir', return_value=root / '.config' / 'hidpi-cli'):
-                with cli.single_instance(Path('/unused/a')):
+            with patch.object(state, 'config_dir', return_value=root / '.config' / 'hidpi-cli'):
+                with runtime.single_instance(Path('/unused/a')):
                     result = subprocess.run([sys.executable, '-c', code], env=env,
                                             capture_output=True, text=True, timeout=10)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 # Releasing the lock permits the next operation.
-                with cli.single_instance(Path('/unused/b')):
+                with runtime.single_instance(Path('/unused/b')):
                     pass
 
 
@@ -138,59 +138,59 @@ class Selection(unittest.TestCase):
     def test_only_real_two_axis_hidpi_selected(self):
         almost = mode(scale=2)
         almost['pixel_height'] = 1080
-        with self.assertRaises(cli.HiDPIError):
-            cli.choose_mode([mode(), almost], (1920, 1080), mode())
+        with self.assertRaises(errors.HiDPIError):
+            modes.choose_mode([mode(), almost], (1920, 1080), mode())
 
     def test_prefer_current_refresh_over_higher_refresh(self):
         sixty, fast = mode(scale=2), mode(scale=2, hz=120)
-        self.assertEqual(cli.choose_mode([fast, sixty], (1920, 1080), mode()), sixty)
+        self.assertEqual(modes.choose_mode([fast, sixty], (1920, 1080), mode()), sixty)
 
     def test_explicit_refresh_cannot_silently_fall_back(self):
-        with self.assertRaises(cli.HiDPIError):
-            cli.choose_mode([mode(scale=2, hz=50)], (1920, 1080), mode(), 60)
+        with self.assertRaises(errors.HiDPIError):
+            modes.choose_mode([mode(scale=2, hz=50)], (1920, 1080), mode(), 60)
 
     def test_changed_mode_ids_do_not_prevent_matching(self):
-        self.assertTrue(cli.mode_matches(mode(mode_id=99), mode(mode_id=1)))
-        self.assertFalse(cli.mode_matches(mode(scale=2), mode()))
+        self.assertTrue(modes.mode_matches(mode(mode_id=99), mode(mode_id=1)))
+        self.assertFalse(modes.mode_matches(mode(scale=2), mode()))
 
 
 class DockIcon(unittest.TestCase):
     def test_long_running_preview_demotes_dock_icon(self):
         mac = FakeMac()
-        with patch.object(cli, 'hide_dock_icon') as hide, patch.object(cli.sys, 'stdin') as stdin:
+        with patch.object(macos, 'hide_dock_icon') as hide, patch.object(cli.sys, 'stdin') as stdin:
             stdin.isatty.return_value = False
             with contextlib.redirect_stdout(io.StringIO()):
-                cli.preview(mac, 3, mode(scale=2, hz=50), 5, True, {'stop': True})
+                runtime.preview(mac, 3, mode(scale=2, hz=50), 5, True, {'stop': True})
         hide.assert_called_once()
 
     def test_hide_dock_icon_requests_ui_element_for_current_process(self):
         library = MagicMock()
         calls = []
         def transform(pointer, kind):
-            psn = cli.C.cast(pointer, cli.C.POINTER(cli.ProcessSerialNumber)).contents
+            psn = macos.C.cast(pointer, macos.C.POINTER(macos.ProcessSerialNumber)).contents
             calls.append((psn.high, psn.low, kind))
             return 0
         library.TransformProcessType.side_effect = transform
-        with patch.object(cli.C, 'CDLL', return_value=library):
-            cli.hide_dock_icon()
+        with patch.object(macos.C, 'CDLL', return_value=library):
+            macos.hide_dock_icon()
         self.assertEqual(calls, [(0, 2, 4)])
-        self.assertEqual(library.TransformProcessType.restype, cli.I)
+        self.assertEqual(library.TransformProcessType.restype, macos.I)
         self.assertEqual(library.TransformProcessType.argtypes,
-                         (cli.C.POINTER(cli.ProcessSerialNumber), cli.U))
+                         (macos.C.POINTER(macos.ProcessSerialNumber), macos.U))
 
     def test_hide_dock_icon_tolerates_missing_library(self):
-        with patch.object(cli.C, 'CDLL', side_effect=OSError('unavailable')):
-            cli.hide_dock_icon()
+        with patch.object(macos.C, 'CDLL', side_effect=OSError('unavailable')):
+            macos.hide_dock_icon()
 
     def test_hide_dock_icon_tolerates_missing_symbol(self):
-        with patch.object(cli.C, 'CDLL', return_value=object()):
-            cli.hide_dock_icon()
+        with patch.object(macos.C, 'CDLL', return_value=object()):
+            macos.hide_dock_icon()
 
     def test_hide_dock_icon_tolerates_native_error_return(self):
         library = MagicMock()
         library.TransformProcessType.return_value = -50
-        with patch.object(cli.C, 'CDLL', return_value=library):
-            cli.hide_dock_icon()
+        with patch.object(macos.C, 'CDLL', return_value=library):
+            macos.hide_dock_icon()
         library.TransformProcessType.assert_called_once()
 
 
@@ -199,12 +199,12 @@ class Rollback(unittest.TestCase):
         args = argparse.Namespace(display=None, size=(1920, 1080), refresh=None,
                                   backup_dir=Path(directory), seconds=5, keep=False)
         with contextlib.redirect_stdout(io.StringIO()):
-            cli.enable_hidpi(mac, args)
+            display.enable_hidpi(mac, args)
 
     def test_backup_failure_prevents_display_change(self):
         mac = FakeMac()
         with tempfile.TemporaryDirectory() as folder, patch.object(
-                cli, 'write_backup', side_effect=OSError('disk full')):
+                backups, 'write_backup', side_effect=OSError('disk full')):
             with self.assertRaises(OSError):
                 self.run_enable(mac, folder)
         self.assertEqual(mac.changes, [])
@@ -212,7 +212,7 @@ class Rollback(unittest.TestCase):
     def test_os_switch_error_restores_original(self):
         mac = FakeMac(fail_switch=True)
         with tempfile.TemporaryDirectory() as folder:
-            with self.assertRaises(cli.HiDPIError):
+            with self.assertRaises(errors.HiDPIError):
                 self.run_enable(mac, folder)
             self.assertEqual(len(list(Path(folder).glob('*.json'))), 1)
         self.assertEqual(mac.actual, mode())
@@ -221,13 +221,13 @@ class Rollback(unittest.TestCase):
     def test_os_silent_noop_is_detected_and_rolled_back(self):
         mac = FakeMac(ignore_switch=True)
         with tempfile.TemporaryDirectory() as folder:
-            with self.assertRaises(cli.HiDPIError):
+            with self.assertRaises(errors.HiDPIError):
                 self.run_enable(mac, folder)
         self.assertEqual(len(mac.restorations), 1)
 
     def test_preview_completion_restores_original(self):
         mac = FakeMac()
-        with tempfile.TemporaryDirectory() as folder, patch.object(cli, 'preview'):
+        with tempfile.TemporaryDirectory() as folder, patch.object(runtime, 'preview'):
             self.run_enable(mac, folder)
         self.assertEqual(len(mac.changes), 1)
         self.assertEqual(mac.actual, mode())
@@ -235,16 +235,16 @@ class Rollback(unittest.TestCase):
     def test_interruption_in_preview_restores_original(self):
         mac = FakeMac()
         with tempfile.TemporaryDirectory() as folder, patch.object(
-                cli, 'preview', side_effect=KeyboardInterrupt):
+                runtime, 'preview', side_effect=KeyboardInterrupt):
             with self.assertRaises(KeyboardInterrupt):
                 self.run_enable(mac, folder)
         self.assertEqual(mac.actual, mode())
 
     def test_restore_failure_preserves_recovery_file(self):
         mac = FakeMac()
-        with tempfile.TemporaryDirectory() as folder, patch.object(cli, 'preview'), patch.object(
-                mac, 'restore', side_effect=cli.HiDPIError('display disconnected')):
-            with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(cli.HiDPIError):
+        with tempfile.TemporaryDirectory() as folder, patch.object(runtime, 'preview'), patch.object(
+                mac, 'restore', side_effect=errors.HiDPIError('display disconnected')):
+            with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(errors.HiDPIError):
                 self.run_enable(mac, folder)
             saved = list(Path(folder).glob('*.json'))
             self.assertEqual(len(saved), 1)

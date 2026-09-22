@@ -1,222 +1,224 @@
 # hidipi
 
-免费开源的 macOS 命令行工具，一条命令开启 HiDPI 显示模式，让屏幕文字和图标更清晰细腻。
+A free, open-source macOS command-line tool that enables HiDPI display modes with one command, making text and icons sharper and clearer.
 
-## 它解决什么问题？
+[English](README.md) | [简体中文](README.zh-CN.md)
 
-你是否遇到过这些情况：
+## What Problem Does It Solve?
 
-- 外接 4K 显示器后，字体发虚、图标模糊，想把界面切到 HiDPI，却发现系统设置里根本没有这个选项；
-- 用远程桌面连接 Mac mini，手边没有实体显示器，想要清晰的 HiDPI 画面只能去买 HDMI 欺骗器；
-- 网上的教程要么让你购买 BetterDisplay 付费版，要么让你修改系统文件、关闭 SIP，风险大还麻烦。
+Do any of these sound familiar?
 
-hidipi 专门解决这些问题。它有两个核心能力：
+- You plugged a 4K monitor into your Mac and everything looks soft and blurry. You'd love to switch the UI to HiDPI, but System Settings simply doesn't offer that option;
+- You remote-desktop into a Mac mini with no monitor attached, and the only way to get a crisp HiDPI picture is buying an HDMI dummy plug;
+- The guides you found online tell you to buy BetterDisplay, patch system files, or disable SIP — risky and a hassle.
 
-1. **启用隐藏的 HiDPI 模式（实体显示器）**：macOS 其实内置了 HiDPI 模式，只是系统设置里不展示。hidipi 帮你列出这些模式并安全切换。
-2. **创建 HiDPI 虚拟屏幕（Apple Silicon）**：没有 HDMI 显示器也能凭空创建一块 HiDPI 虚拟屏，远程桌面直接使用，无需欺骗器。
+hidipi exists to solve exactly these problems. It does two things:
 
-同时，你**不需要**：付费软件、sudo 权限、修改系统文件、关闭 SIP、安装任何第三方依赖（纯 Python 标准库实现）。
+1. **Unlock hidden HiDPI modes (real displays)** — macOS already ships HiDPI modes; it just doesn't show them in System Settings. hidipi lists them and switches safely.
+2. **Create a HiDPI virtual display (Apple Silicon)** — no HDMI monitor or dummy plug needed; your remote desktop can use it directly.
 
-## 安装
+And you **don't** need: paid software, sudo, modified system files, a disabled SIP, or any third-party dependencies (pure Python standard library).
 
-要求：macOS + [uv](https://docs.astral.sh/uv/)，在**已登录桌面的本机终端**操作（部分受限沙箱终端读不到显示器信息）。
+## Installation
 
-在项目目录执行：
+Requirements: macOS + [uv](https://docs.astral.sh/uv/), run in a **local terminal on your logged-in desktop** (sandboxed terminals may not see any displays).
+
+From the project directory:
 
 ```sh
 uv tool install .
 ```
 
-安装后在任意目录都能运行 `hidipi`。如果提示找不到命令，请把 uv 的工具目录（通常 `~/.local/bin`）加入 PATH。
+After installing, `hidipi` works from any directory. If the command is not found, make sure uv's tool bin directory (usually `~/.local/bin`) is in your PATH.
 
 ```sh
-# 验证安装，同时查看备份和日志目录位置
+# Verify the install and see where backups and logs live
 hidipi paths
 ```
 
-> 开发调试时可以不安装，直接在项目目录运行 `uv run hidipi ...`。两种方式共用同一份用户数据（`~/.config/hidipi/`）。
-> 旧命令 `hidpi` 仍然可用，是 `hidipi` 的兼容别名。
+> For development you can skip installing and run `uv run hidipi ...` from the repo. Both share the same user data (`~/.config/hidipi/`).
+> The old `hidpi` command still works as a compatibility alias for `hidipi`.
 
-## 快速上手（三步）
+## Quick Start (Three Steps)
 
-### 第 1 步：查看支持的 HiDPI 模式
+### Step 1: See the available HiDPI modes
 
 ```sh
 hidipi list
 ```
 
-列出每台显示器的 HiDPI 模式（界面尺寸、渲染分辨率、刷新率）。想看包括普通 DPI 在内的所有模式，加 `--all`。
+This lists each display's HiDPI modes (logical size, render resolution, refresh rate). Add `--all` to also see normal-DPI modes.
 
-### 第 2 步：安全预览 20 秒
+### Step 2: Preview safely for 20 seconds
 
 ```sh
 hidipi enable --size 1920x1080
 ```
 
-- 切换前会**自动备份**当前显示设置，随时可以恢复；
-- 默认预览 20 秒：觉得不错就输入 `y` 回车继续使用；不想要就按 `Ctrl+C`（或等倒计时结束），自动恢复原样。
+- Your current display settings are **automatically backed up** before anything changes, so you can always go back;
+- By default it previews for 20 seconds: type `y` + Enter to keep it, or press `Ctrl+C` (or let the countdown end) to restore automatically.
 
-### 第 3 步：满意后长期使用
+### Step 3: Keep it, long-term
 
 ```sh
-# 方式一：保持终端窗口打开，直到按 Ctrl+C 才恢复
+# Option 1: keep the terminal window open; settings restore on Ctrl+C
 hidipi enable --size 1920x1080 --keep
 
-# 方式二：开机自动启用，后台运行，无需保留终端（推荐）
+# Option 2: enable automatically at login, runs in the background, no terminal needed (recommended)
 hidipi autostart install --size 1920x1080
 hidipi autostart status
 ```
 
-> **重要**：方式一需要 hidipi 进程保持运行，关闭终端会恢复原设置。想长期使用请选方式二。
+> **Important**: Option 1 requires the hidipi process to keep running — closing the terminal restores the original settings. For long-term use, choose Option 2.
 
-## 常用场景速查
+## Common Scenarios
 
-### 多显示器 / 指定刷新率
+### Multiple displays / specific refresh rate
 
 ```sh
-# 多显示器时，用 list 输出中的 ID 指定目标屏幕
+# With multiple displays, target one by its ID from `hidipi list`
 hidipi enable --display 3 --size 1920x1080
 
-# 指定刷新率（系统不支持时直接报错，不会偷偷降级）
+# Request a refresh rate (fails loudly if unsupported — never silently downgrades)
 hidipi enable --size 1920x1080 --refresh 60
 
-# 省略 --size，默认使用当前界面尺寸对应的 HiDPI 模式
+# Omit --size to use the HiDPI mode matching your current logical size
 hidipi enable
 
-# 非交互场景：固定预览 5 秒后自动恢复
+# Non-interactive: auto-restore after a fixed 5-second preview
 hidipi enable --size 1920x1080 --seconds 5
 ```
 
-### 远程桌面 / 没有实体显示器
+### Remote desktop / no physical display
 
-Apple Silicon Mac 可以创建独立的 HiDPI 虚拟屏幕，屏幕名称为 **HiDPI Virtual Display**：
+On Apple Silicon Macs you can create a standalone HiDPI virtual display, named **HiDPI Virtual Display**:
 
 ```sh
-# 前台预览 20 秒，之后自动移除；输入 y 可保留
+# Foreground preview for 20 seconds, then removed automatically; type y to keep
 hidipi virtual --size 1920x1080
 
-# 持续运行，按 Ctrl+C 移除虚拟屏幕
+# Keep running; press Ctrl+C to remove the virtual display
 hidipi virtual --size 1920x1080 --keep
 
-# 开机自动创建虚拟屏幕
-# （如果之前装过物理屏幕的自启动，先执行 hidipi autostart uninstall）
+# Create it automatically at login
+# (if you previously installed autostart for a physical display, run hidipi autostart uninstall first)
 hidipi autostart install --virtual --size 1920x1080
 hidipi autostart status
 ```
 
-逻辑尺寸 `1920x1080` 按 `3840x2160`（2 倍像素）渲染，默认 60 Hz。
+Logical size `1920x1080` renders at `3840x2160` (2× pixels), 60 Hz by default.
 
-注意事项：
+Things to know:
 
-- hidipi 只负责"造屏幕"，**不包含远程连接功能**，也不会自动开启屏幕共享；
-- 在远程软件中选择 HiDPI Virtual Display 这块屏即可；
-- 如果实体屏幕仍连着，虚拟屏是额外的独立桌面，不会自动镜像；
-- 停止唯一的虚拟屏幕时，远程会话可能短暂重排或断开，请在方便重连时操作。
+- hidipi only creates the display — it is **not a remote-connection tool** and never enables Screen Sharing by itself;
+- In your remote client, simply pick HiDPI Virtual Display;
+- If a physical display is still attached, the virtual one is an extra desktop — it is not mirrored automatically;
+- Stopping the only virtual display may briefly rearrange or drop your remote session — do it when reconnecting is easy.
 
-### 开机自动启用（登录自启动）
+### Enable at login (autostart)
 
-安装一次，之后每次登录桌面自动启用 HiDPI，无需保留终端：
+Install once, and HiDPI turns on automatically every time you log into the desktop — no terminal to keep around:
 
 ```sh
-# 启用（物理屏幕模式）
+# Enable (physical display mode)
 hidipi autostart install --size 1920x1080
 
-# 查看运行状态和最近日志
+# Check status and recent logs
 hidipi autostart status
 
-# 只预览将生成的配置，不实际写入
+# Preview the generated config without writing anything
 hidipi autostart install --size 1920x1080 --dry-run
 
-# 停止后台进程、取消自启动、恢复安装前的显示设置（所有备份仍保留）
+# Stop the background process, cancel autostart, restore pre-install settings (all backups kept)
 hidipi autostart uninstall
 ```
 
-注意：
+Notes:
 
-- 手动运行 `enable` / `virtual` / `restore` 前，先 `hidipi autostart uninstall`，避免两个进程同时修改显示器；
-- 升级或卸载工具前，也请先执行 `hidipi autostart uninstall`；
-- 运行日志在 `~/.config/hidipi/logs/`（`autostart.log` 和 `autostart-error.log`）。
+- Before running `enable` / `virtual` / `restore` manually, run `hidipi autostart uninstall` first, so two processes never fight over the display;
+- Before upgrading or uninstalling the tool, also run `hidipi autostart uninstall` first;
+- Logs live in `~/.config/hidipi/logs/` (`autostart.log` and `autostart-error.log`).
 
-### 恢复原样
+### Restore to original
 
-每次修改显示设置前，hidipi 都会自动备份一份完整快照，存放在 `~/.config/hidipi/backups/`，从不覆盖：
+Before every change, hidipi automatically saves a complete snapshot of your display settings to `~/.config/hidipi/backups/` — never overwritten:
 
 ```sh
-# 查看所有历史备份
+# List historical backups
 ls ~/.config/hidipi/backups/
 
-# 用实际文件名恢复
+# Restore using an actual file name
 hidipi restore ~/.config/hidipi/backups/display-20260921-153000-abcdef12.json
 
-# 只备份当前设置，不做任何修改
+# Back up the current settings without changing anything
 hidipi backup
 ```
 
-- 备份按屏幕 UUID 匹配，重启后也能恢复到正确的显示器；
-- 恢复前若原显示器没接上，会明确报错而不是乱改，接回屏幕后再试即可；
-- `restore` 执行前也会先备份一份当前状态，放心操作。
+- Backups match displays by UUID, so restoring still targets the right screen after a reboot;
+- If the original display isn't connected, restore fails with a clear error instead of guessing — reconnect and retry;
+- `restore` also backs up the current state first, so you can experiment freely.
 
-## 安全机制
+## Safety Guarantees
 
-- **先备份再动手**：每次切换前自动备份并回读核验，核验通过才会修改显示器。
-- **退出即恢复**：`Ctrl+C`、关闭终端、预览超时、切换失败，都会自动恢复原设置并核验。
-- **随时可回退**：所有备份长期保留，`hidipi restore <文件>` 一条命令回到任意历史状态。
-- **不碰系统底层**：不修改显示器 EDID、不写系统配置文件，只使用系统已有的显示模式。
+- **Backup before touching anything**: every switch is preceded by an automatic, read-back-verified backup; the display is only modified after verification passes.
+- **Exit means restore**: `Ctrl+C`, closing the terminal, preview timeout, or a failed switch all restore the original settings and verify the result.
+- **Roll back anytime**: every backup is kept; `hidipi restore <file>` takes you back to any point in history.
+- **Nothing low-level is touched**: no EDID modification, no system config files — only display modes macOS already provides.
 
-## 常见问题
+## FAQ
 
-**Q：开启 HiDPI 到底有什么效果？**
-界面元素尺寸不变，但用双倍像素渲染（例如 1920×1080 的界面实际按 3840×2160 渲染），文字和图标更细腻。它不会把普通面板"变成" 4K，实际清晰度提升请以你的观感为准。
+**Q: What does enabling HiDPI actually do?**
+UI elements keep the same size but render with twice the pixels (e.g. a 1920×1080 UI actually renders at 3840×2160), so text and icons look finer. It does not turn an ordinary panel into a 4K one — judge the improvement with your own eyes.
 
-**Q：为什么开了 HiDPI 刷新率变低了？**
-渲染像素翻倍，部分显示器带宽不够。例如 4K 屏在 HiDPI 模式下可能只有 50 Hz（普通模式 60 Hz）。用 `hidipi list` 可提前查看各模式刷新率；也可用 `--refresh 60` 指定，不支持时直接报错，不会静默降级。
+**Q: Why did my refresh rate drop after enabling HiDPI?**
+Rendering pixels doubled, and some displays run out of bandwidth — e.g. a 4K panel may top out at 50 Hz in HiDPI (60 Hz in normal mode). Check modes ahead of time with `hidipi list`; you can also pass `--refresh 60`, which fails loudly if unsupported rather than silently downgrading.
 
-**Q：终端窗口能关吗？**
-`enable` 和 `virtual` 需要进程保持运行：关闭终端、按 `Ctrl+C` 或进程退出都会恢复原设置。想长期使用请用 `autostart install`，它后台运行、不占终端、不出现在 Dock。
+**Q: Can I close the terminal?**
+`enable` and `virtual` need their process alive: closing the terminal, pressing `Ctrl+C`, or the process exiting restores the original settings. For long-term use, `autostart install` runs in the background with no terminal and no Dock icon.
 
-**Q：出问题了怎么彻底还原？**
+**Q: Something went wrong — how do I get completely back to normal?**
 
-1. 结束前台进程（`Ctrl+C`），或执行 `hidipi autostart uninstall` 停止后台服务；
-2. 需要时用 `hidipi restore <备份文件>` 恢复任意历史备份。
+1. End the foreground process (`Ctrl+C`), or run `hidipi autostart uninstall` to stop the background service;
+2. If needed, `hidipi restore <backup-file>` restores any historical backup.
 
-**Q：为什么切换失败，提示屏幕正在镜像？**
-hidipi 不会改动镜像组，请先在系统设置中解除镜像，再重新运行。
+**Q: Why does switching fail with a message about mirroring?**
+hidipi never touches a mirrored display group. Uncheck mirroring in System Settings first, then run it again.
 
-**Q：`hidipi list` 看不到任何显示器？**
-请在已登录桌面的本机终端运行。某些受限沙箱（如 IDE 内嵌终端、远程 shell）中系统接口读不到显示器。
+**Q: `hidipi list` shows no displays?**
+Run it from a local terminal in your logged-in desktop session. In restricted sandboxes (IDE terminals, remote shells) the system APIs may see zero displays.
 
-**Q：和 BetterDisplay 有什么区别？**
-hidipi 免费、开源、零第三方依赖，专注"开启 HiDPI + 自动备份回滚"这一件事。BetterDisplay 是功能更全面的商业工具；如果你还需要缩放、色彩控制等高级功能，请使用它们。
+**Q: How is this different from BetterDisplay?**
+hidipi is free, open source, dependency-free, and focused on exactly one thing: enabling HiDPI with automatic backup and rollback. BetterDisplay is a full-featured commercial product — if you need scaling, color controls, and more, use that.
 
-**Q：支持哪些系统？**
-macOS。实体屏幕的 HiDPI 模式通过系统公开接口启用；虚拟屏幕功能使用 macOS 私有接口，目前仅支持 Apple Silicon（原生 ARM64 Python）。
+**Q: Which systems are supported?**
+macOS. HiDPI modes on physical displays use public system APIs; the virtual display feature uses a private macOS API and currently requires Apple Silicon (native ARM64 Python).
 
-## 进阶与开发
+## Advanced & Development
 
 ```sh
-# 自定义备份目录（注意参数放在子命令前面）
+# Custom backup directory (note: the flag goes before the subcommand)
 hidipi --backup-dir /path/to/backups backup
 
-# 运行自动化测试（使用模拟接口，不切换真实屏幕）
+# Run the automated tests (mocked interfaces — no real display switching)
 uv run python -m unittest discover -s tests -v
 
-# 真实系统接口冒烟测试（仅限已登录桌面的本机终端，勿在沙箱中运行）
+# Real system-API smoke test (only from a local desktop terminal; never inside a sandbox)
 HIDPI_NATIVE_TESTS=1 uv run python -m unittest discover -s tests -p test_native.py -v
 ```
 
-代码结构一览：`cli.py`（命令入口）、`display.py` / `virtual.py`（实体 / 虚拟屏幕流程）、`backup.py`（备份核验）、`autostart.py`（登录自启动）、`runtime.py`（进程与信号处理）、`macos.py`（macOS 系统接口）、`modes.py` / `state.py` / `errors.py`。
+Code layout: `cli.py` (command entry), `display.py` / `virtual.py` (physical / virtual display flows), `backup.py` (backup verification), `autostart.py` (login autostart), `runtime.py` (process & signal handling), `macos.py` (macOS system APIs), `modes.py` / `state.py` / `errors.py`.
 
-2026-09 已在 M4 Mac mini / macOS 27.0 上完成实机验证：模式切换与恢复、预览超时回退、跨进程备份恢复、虚拟屏幕创建与移除均通过。更多实现细节（锁文件、状态记录、故障重试）见源码与测试。
+Verified on a Mac mini (M4) / macOS 27.0 in 2026-09: mode switching and restore, preview-timeout rollback, cross-process backup restore, and virtual display create/remove all pass. Implementation details (lock files, state journal, failure retries) live in the source and tests.
 
-## 许可证
+## License
 
 [MIT](LICENSE)
 
-## 参考
+## References
 
-- [Apple：CGDisplayCopyAllDisplayModes](https://developer.apple.com/documentation/coregraphics/cgdisplaycopyalldisplaymodes(_:_:))
-- [Apple：进程级显示配置回退](https://developer.apple.com/documentation/coregraphics/cgconfigureoption/forapponly)
-- [Apple：显示配置事务](https://developer.apple.com/library/archive/documentation/GraphicsImaging/Conceptual/QuartzDisplayServicesConceptual/Articles/DisplayTransactions.html)
-- [Apple：LaunchAgent 登录启动](https://developer.apple.com/library/archive/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/CreatingLaunchdJobs.html)
-- [uv：独立工具环境](https://docs.astral.sh/uv/concepts/tools/)
-- [Chromium：CGVirtualDisplay 接口与无屏幕检测](https://chromium.googlesource.com/chromium/src/+/HEAD/ui/display/mac/test/virtual_display_util_mac.mm)
+- [Apple: CGDisplayCopyAllDisplayModes](https://developer.apple.com/documentation/coregraphics/cgdisplaycopyalldisplaymodes(_:_:))
+- [Apple: Process-scoped display configuration rollback](https://developer.apple.com/documentation/coregraphics/cgconfigureoption/forapponly)
+- [Apple: Display configuration transactions](https://developer.apple.com/library/archive/documentation/GraphicsImaging/Conceptual/QuartzDisplayServicesConceptual/Articles/DisplayTransactions.html)
+- [Apple: LaunchAgent login items](https://developer.apple.com/library/archive/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/CreatingLaunchdJobs.html)
+- [uv: Standalone tool environments](https://docs.astral.sh/uv/concepts/tools/)
+- [Chromium: CGVirtualDisplay API and headless detection](https://chromium.googlesource.com/chromium/src/+/HEAD/ui/display/mac/test/virtual_display_util_mac.mm)

@@ -124,7 +124,7 @@ try:
 except errors.HiDPIError:
     pass
 '''
-            with patch.object(state, 'config_dir', return_value=root / '.config' / 'hidpi-cli'):
+            with patch.object(state, 'config_dir', return_value=root / '.config' / 'hidipi'):
                 with runtime.single_instance(Path('/unused/a')):
                     result = subprocess.run([sys.executable, '-c', code], env=env,
                                             capture_output=True, text=True, timeout=10)

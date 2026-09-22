@@ -10,7 +10,7 @@ from . import autostart, backup as backups, display, errors, macos, modes as dis
 def main():
     parser = argparse.ArgumentParser(description='免费 macOS HiDPI 工具：自动备份、限时预览、退出恢复。')
     parser.add_argument('--backup-dir', type=Path, default=state.backup_dir(),
-                        help='备份目录（默认 ~/.config/hidpi-cli/backups）')
+                        help='备份目录（默认 ~/.config/hidipi/backups）')
     sub = parser.add_subparsers(dest='command', required=True)
     listing = sub.add_parser('list', help='只读：列出显示器和 HiDPI 模式')
     listing.add_argument('--all', action='store_true', help='也显示普通 DPI 模式')

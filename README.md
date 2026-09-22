@@ -34,7 +34,7 @@ uv tool install .
 hidipi paths
 ```
 
-> 开发调试时可以不安装，直接在项目目录运行 `uv run hidipi ...`。两种方式共用同一份用户数据（`~/.config/hidpi-cli/`）。
+> 开发调试时可以不安装，直接在项目目录运行 `uv run hidipi ...`。两种方式共用同一份用户数据（`~/.config/hidipi/`）。
 > 旧命令 `hidpi` 仍然可用，是 `hidipi` 的兼容别名。
 
 ## 快速上手（三步）
@@ -135,18 +135,18 @@ hidipi autostart uninstall
 
 - 手动运行 `enable` / `virtual` / `restore` 前，先 `hidipi autostart uninstall`，避免两个进程同时修改显示器；
 - 升级或卸载工具前，也请先执行 `hidipi autostart uninstall`；
-- 运行日志在 `~/.config/hidpi-cli/logs/`（`autostart.log` 和 `autostart-error.log`）。
+- 运行日志在 `~/.config/hidipi/logs/`（`autostart.log` 和 `autostart-error.log`）。
 
 ### 恢复原样
 
-每次修改显示设置前，hidipi 都会自动备份一份完整快照，存放在 `~/.config/hidpi-cli/backups/`，从不覆盖：
+每次修改显示设置前，hidipi 都会自动备份一份完整快照，存放在 `~/.config/hidipi/backups/`，从不覆盖：
 
 ```sh
 # 查看所有历史备份
-ls ~/.config/hidpi-cli/backups/
+ls ~/.config/hidipi/backups/
 
 # 用实际文件名恢复
-hidipi restore ~/.config/hidpi-cli/backups/display-20260921-153000-abcdef12.json
+hidipi restore ~/.config/hidipi/backups/display-20260921-153000-abcdef12.json
 
 # 只备份当前设置，不做任何修改
 hidipi backup

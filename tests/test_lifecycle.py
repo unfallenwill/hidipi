@@ -176,7 +176,7 @@ class LifecycleTests(unittest.TestCase):
     def test_renamed_project_can_uninstall_legacy_agent(self):
         saved = self.prepare_agent()
         data = plistlib.loads(self.path.read_bytes())
-        data['Label'] = 'local.hidpi-cli.agent'
+        data['Label'] = 'local.hidipi.agent'
         data['ProgramArguments'][3] = 'hidpi_cli'
         self.path.write_bytes(plistlib.dumps(data))
         mac = FakeMac()

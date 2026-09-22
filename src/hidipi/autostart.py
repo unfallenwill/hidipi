@@ -11,8 +11,7 @@ import tempfile
 
 from . import backup as backups, errors, macos, modes as display_modes, runtime, state
 
-# Keep the installed service identity so hidipi can manage existing agents.
-LABEL = 'local.hidpi-cli.agent'
+LABEL = 'local.hidipi.agent'
 
 
 def agent_path():
@@ -57,7 +56,7 @@ def make_plist(python, workdir, backup_dir, identity, mode, backup):
         ExitTimeOut=20, ProcessType='Interactive',
         StandardOutPath=str(workdir / 'logs' / 'autostart.log'),
         StandardErrorPath=str(workdir / 'logs' / 'autostart-error.log'),
-        EnvironmentVariables={'HIDPI_INSTALL_BACKUP': str(backup)})
+        EnvironmentVariables={'HIDIPI_INSTALL_BACKUP': str(backup)})
 
 
 def make_virtual_plist(python, workdir, backup_dir, mode, backup):
@@ -65,7 +64,7 @@ def make_virtual_plist(python, workdir, backup_dir, mode, backup):
     data['ProgramArguments'] = [str(python), '-u', '-m', 'hidipi',
         '--backup-dir', str(backup_dir), 'virtual', '--size', f'{mode["width"]}x{mode["height"]}',
         '--refresh', str(mode['hz']), '--keep']
-    data['EnvironmentVariables']['HIDPI_MODE'] = 'virtual'
+    data['EnvironmentVariables']['HIDIPI_MODE'] = 'virtual'
     return data
 
 
@@ -190,7 +189,7 @@ def status():
                 print(line.strip())
     if path.exists():
         data = read_agent(path)
-        print('安装前备份：' + data['EnvironmentVariables']['HIDPI_INSTALL_BACKUP'])
+        print('安装前备份：' + data['EnvironmentVariables']['HIDIPI_INSTALL_BACKUP'])
         for key in ('StandardOutPath', 'StandardErrorPath'):
             log = Path(data[key])
             print(f'日志：{log}')
@@ -213,7 +212,7 @@ def recovery_record(path):
     if path.exists():
         data = read_agent(path)
         environment = data.get('EnvironmentVariables', {})
-        backup = environment.get('HIDPI_INSTALL_BACKUP')
+        backup = environment.get('HIDIPI_INSTALL_BACKUP')
         if not isinstance(backup, str) or not backup:
             raise errors.HiDPIError('启动项缺少安装前备份路径；保留配置供检查。')
         # Reconstruct essential fields even if the optional settings JSON broke.
@@ -223,7 +222,7 @@ def recovery_record(path):
             record = {}
         return dict(record, schema=1, enabled=True, phase='stop_pending',
                     install_backup=backup,
-                    mode=environment.get('HIDPI_MODE', 'physical'))
+                    mode=environment.get('HIDIPI_MODE', 'physical'))
     record = state.load_settings()
     if record.get('phase') == 'restore_pending':
         if not isinstance(record.get('install_backup'), str) or not record['install_backup']:

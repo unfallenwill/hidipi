@@ -98,7 +98,7 @@ class VirtualTests(unittest.TestCase):
         self.assertIn('--keep', argv)
         self.assertNotIn('--display-uuid', argv)
         self.assertNotIn('--wait-display', argv)
-        self.assertEqual(data['EnvironmentVariables']['HIDPI_MODE'], 'virtual')
+        self.assertEqual(data['EnvironmentVariables']['HIDIPI_MODE'], 'virtual')
 
     def test_virtual_preview_completion_removes_screen(self):
         mac, display = MagicMock(), MagicMock()

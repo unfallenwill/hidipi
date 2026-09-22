@@ -6,8 +6,7 @@ import tempfile
 
 
 def config_dir():
-    # Stable across the hidpi-cli -> hidipi rename, including process locks.
-    return Path.home() / '.config' / 'hidpi-cli'
+    return Path.home() / '.config' / 'hidipi'
 
 
 def backup_dir():

@@ -14,8 +14,8 @@ class StateTests(unittest.TestCase):
     def test_default_paths_do_not_depend_on_cwd(self):
         with patch.object(Path, 'home', return_value=Path('/users/example')), patch.object(
                 Path, 'cwd', side_effect=AssertionError('must not depend on cwd')):
-            self.assertEqual(state.config_dir(), Path('/users/example/.config/hidpi-cli'))
-            self.assertEqual(state.backup_dir(), Path('/users/example/.config/hidpi-cli/backups'))
+            self.assertEqual(state.config_dir(), Path('/users/example/.config/hidipi'))
+            self.assertEqual(state.backup_dir(), Path('/users/example/.config/hidipi/backups'))
 
     def test_settings_are_private_and_atomically_replaced(self):
         with tempfile.TemporaryDirectory() as folder, patch.object(state, 'config_dir', return_value=Path(folder)):

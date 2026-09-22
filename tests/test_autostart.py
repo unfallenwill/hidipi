@@ -37,7 +37,7 @@ class AutostartTests(unittest.TestCase):
         self.assertFalse(data['KeepAlive'])
         self.assertEqual(data['WorkingDirectory'], '/project with space')
         self.assertEqual(data['StandardOutPath'], '/project with space/logs/autostart.log')
-        self.assertEqual(data['EnvironmentVariables']['HIDPI_INSTALL_BACKUP'], '/backups/original.json')
+        self.assertEqual(data['EnvironmentVariables']['HIDIPI_INSTALL_BACKUP'], '/backups/original.json')
 
     def test_bootstrap_failure_preserves_plist_and_recovery_record(self):
         with tempfile.TemporaryDirectory() as folder:

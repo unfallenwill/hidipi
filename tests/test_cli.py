@@ -155,13 +155,17 @@ class Selection(unittest.TestCase):
 
 
 class DockIcon(unittest.TestCase):
-    def test_long_running_preview_demotes_dock_icon(self):
+    def test_long_running_preview_shows_menubar_and_demotes_dock_icon(self):
         mac = FakeMac()
-        with patch.object(macos, 'hide_dock_icon') as hide, patch.object(cli.sys, 'stdin') as stdin:
+        with patch.object(macos, 'hide_dock_icon') as hide, patch.object(cli.sys, 'stdin') as stdin, \
+                patch.object(runtime.menubar, 'start') as bar, patch.object(runtime.menubar, 'stop') as close:
             stdin.isatty.return_value = False
             with contextlib.redirect_stdout(io.StringIO()):
                 runtime.preview(mac, 3, mode(scale=2, hz=50), 5, True, {'stop': True})
         hide.assert_called_once()
+        bar.assert_called_once()
+        self.assertIn('渲染 3840×2160', bar.call_args[0][0])
+        close.assert_called_once_with(bar.return_value)
 
     def test_hide_dock_icon_requests_ui_element_for_current_process(self):
         library = MagicMock()

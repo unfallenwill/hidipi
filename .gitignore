@@ -1,5 +1,6 @@
-.venv/
+venv/
 __pycache__/
 *.pyc
 .hidpi-backups/
 dist/
+.DS_Store

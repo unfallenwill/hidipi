@@ -165,6 +165,15 @@ hidipi backup
 - **Roll back anytime**: every backup is kept; `hidipi restore <file>` takes you back to any point in history.
 - **Nothing low-level is touched**: no EDID modification, no system config files — only display modes macOS already provides.
 
+## Menu Bar Icon
+
+While hidipi is running (preview, `--keep`, or the login autostart agent), a small hidipi icon appears in the macOS menu bar:
+
+- Click it to see the active mode;
+- **Restore & Quit** rolls everything back — exactly like pressing `Ctrl+C`.
+
+To hide the icon, set the environment variable `HIDIPI_MENUBAR=0`. The icon is cosmetic: if it can't be shown (e.g. no desktop session), everything else still works.
+
 ## FAQ
 
 **Q: What does enabling HiDPI actually do?**

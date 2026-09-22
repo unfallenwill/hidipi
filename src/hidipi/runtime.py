@@ -6,7 +6,7 @@ import select
 import signal
 import sys
 import time
-from . import errors, macos, modes as display_modes, state
+from . import errors, macos, menubar, modes as display_modes, state
 
 
 @contextlib.contextmanager
@@ -56,6 +56,16 @@ def stop_signals():
 
 def preview(mac, display, expected, seconds, keep, stopping, mode_check=display_modes.mode_matches):
     macos.hide_dock_icon()
+    # Cosmetic icon; degrades to None outside a desktop session or on failure.
+    bar = menubar.start(display_modes.describe(expected),
+                        lambda: stopping.__setitem__('stop', True))
+    try:
+        _preview_loop(mac, display, expected, seconds, keep, stopping, mode_check)
+    finally:
+        menubar.stop(bar)
+
+
+def _preview_loop(mac, display, expected, seconds, keep, stopping, mode_check):
     deadline = time.monotonic() + seconds
     interactive = sys.stdin.isatty()
     if keep:

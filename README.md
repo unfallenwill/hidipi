@@ -1,252 +1,219 @@
 # hidipi
 
-免费的本机 macOS 命令行工具，Python 标准库实现，使用 `ctypes` 调用系统显示接口。
-不依赖 BetterDisplay，不修改 EDID 或系统配置文件，不需要 sudo、关闭 SIP 或付费软件。
+免费开源的 macOS 命令行工具，一条命令开启 HiDPI 显示模式，让屏幕文字和图标更清晰细腻。
 
-项目、发行包及 Python 模块名统一为 **hidipi**，主命令为 `hidipi`，也支持 `python -m hidipi`。
-原命令 `hidpi` 保留为兼容别名。HiDPI 是显示技术名称，继续使用原拼写。
+## 它解决什么问题？
 
-## 安装与目录
+你是否遇到过这些情况：
 
-在项目目录安装为独立工具（普通安装，不使用 `--editable`）：
+- 外接 4K 显示器后，字体发虚、图标模糊，想把界面切到 HiDPI，却发现系统设置里根本没有这个选项；
+- 用远程桌面连接 Mac mini，手边没有实体显示器，想要清晰的 HiDPI 画面只能去买 HDMI 欺骗器；
+- 网上的教程要么让你购买 BetterDisplay 付费版，要么让你修改系统文件、关闭 SIP，风险大还麻烦。
+
+hidipi 专门解决这些问题。它有两个核心能力：
+
+1. **启用隐藏的 HiDPI 模式（实体显示器）**：macOS 其实内置了 HiDPI 模式，只是系统设置里不展示。hidipi 帮你列出这些模式并安全切换。
+2. **创建 HiDPI 虚拟屏幕（Apple Silicon）**：没有 HDMI 显示器也能凭空创建一块 HiDPI 虚拟屏，远程桌面直接使用，无需欺骗器。
+
+同时，你**不需要**：付费软件、sudo 权限、修改系统文件、关闭 SIP、安装任何第三方依赖（纯 Python 标准库实现）。
+
+## 安装
+
+要求：macOS + [uv](https://docs.astral.sh/uv/)，在**已登录桌面的本机终端**操作（部分受限沙箱终端读不到显示器信息）。
+
+在项目目录执行：
 
 ```sh
 uv tool install .
 ```
 
-安装后在任意目录都可以运行 `hidipi`。uv 会把程序复制到独立工具环境，运行时不需要源码目录。
-如果提示找不到 `hidipi`，确保 uv 输出的工具 bin 目录（通常 `~/.local/bin`）在 PATH 中。
-开发时仍可在仓库运行 `uv run hidipi ...`，两种方式默认共用同一份用户数据：
-
-```text
-~/.config/hidpi-cli/
-├── autostart.json       # 自启动记录：屏幕 UUID、尺寸、刷新率、安装前备份路径
-├── backups/            # 历次显示设置备份
-└── logs/               # 自启动日志和错误日志
-```
-
-`hidipi paths` 显示实际目录。数据路径不依赖调用时的工作目录，也不在工具虚拟环境内，
-重新安装工具不会主动删除这些数据。`autostart.json` 是安装状态记录；修改自启动参数请卸载后重新安装，
-单独编辑该 JSON 不会更改已经加载的 LaunchAgent。
-
-从旧版 `hidpi-cli` 升级时，先停止旧服务并卸载旧工具，避免 `hidpi` 命令别名冲突，再安装新版：
+安装后在任意目录都能运行 `hidipi`。如果提示找不到命令，请把 uv 的工具目录（通常 `~/.local/bin`）加入 PATH。
 
 ```sh
-hidpi autostart uninstall
-uv tool uninstall hidpi-cli
-uv tool install .
+# 验证安装，同时查看备份和日志目录位置
 hidipi paths
 ```
 
-之后按原来的尺寸及实体/虚拟模式参数重新运行 `hidipi autostart install`。
-停止唯一虚拟屏幕会影响远程桌面连接，请在可重新连接或本机操作时升级。
-旧 LaunchAgent 的 Python 环境和 `-m hidpi_cli` 入口不会被源码改名自动更新。
-为兼容已有安装，数据与锁目录 `~/.config/hidpi-cli`、服务标识 `local.hidpi-cli.agent`、
-`HIDPI_INSTALL_BACKUP` / `HIDPI_MODE` 字段及 `HIDPI_NATIVE_TESTS` 测试开关保持不变；不自动迁移或删除历史备份。
+> 开发调试时可以不安装，直接在项目目录运行 `uv run hidipi ...`。两种方式共用同一份用户数据（`~/.config/hidpi-cli/`）。
+> 旧命令 `hidpi` 仍然可用，是 `hidipi` 的兼容别名。
 
-## 使用
+## 快速上手（三步）
 
-在已登录 macOS 桌面的终端运行：
+### 第 1 步：查看支持的 HiDPI 模式
 
 ```sh
 hidipi list
-hidipi backup
+```
+
+列出每台显示器的 HiDPI 模式（界面尺寸、渲染分辨率、刷新率）。想看包括普通 DPI 在内的所有模式，加 `--all`。
+
+### 第 2 步：安全预览 20 秒
+
+```sh
 hidipi enable --size 1920x1080
 ```
 
-`enable` 每次先写入并回读核验备份，再切换系统已有的 HiDPI 模式。
-默认预览 20 秒后恢复。在交互终端里输入 `y` 并回车可继续使用，按 `Ctrl+C` 恢复。
-**保持 HiDPI 时需要保留进程；关闭终端、正常终止进程会触发恢复。**
+- 切换前会**自动备份**当前显示设置，随时可以恢复；
+- 默认预览 20 秒：觉得不错就输入 `y` 回车继续使用；不想要就按 `Ctrl+C`（或等倒计时结束），自动恢复原样。
+
+### 第 3 步：满意后长期使用
 
 ```sh
-# 跳过预览倒计时，直到 Ctrl+C 才恢复
+# 方式一：保持终端窗口打开，直到按 Ctrl+C 才恢复
 hidipi enable --size 1920x1080 --keep
 
-# 仅当系统存在对应的 60 Hz HiDPI 模式时才切换
-hidipi enable --size 1920x1080 --refresh 60
-
-# 多显示器时，使用 list 返回的 ID
-hidipi enable --display 3 --size 1920x1080
-
-# 非交互测试：5 秒后自动恢复
-hidipi enable --size 1920x1080 --seconds 5
-
-# 查看包括普通 DPI 在内的模式
-hidipi list --all
-
-# 用控制台输出的真实备份路径替换下方示例
-hidipi restore ~/.config/hidpi-cli/backups/display-YYYYMMDD-HHMMSS-xxxxxxxx.json
+# 方式二：开机自动启用，后台运行，无需保留终端（推荐）
+hidipi autostart install --size 1920x1080
+hidipi autostart status
 ```
 
-可以省略 `--size`，默认寻找当前界面逻辑尺寸对应的 HiDPI 模式。
-未指定 `--refresh` 时优先保持原刷新率，否则选择该尺寸可用的最高刷新率并明确提示。
+> **重要**：方式一需要 hidipi 进程保持运行，关闭终端会恢复原设置。想长期使用请选方式二。
 
-## 无实体屏幕 / 远程桌面
+## 常用场景速查
 
-Apple Silicon Mac 可以创建独立的 HiDPI 虚拟屏幕，无需 HDMI 显示器或 HDMI 欺骗器：
+### 多显示器 / 指定刷新率
+
+```sh
+# 多显示器时，用 list 输出中的 ID 指定目标屏幕
+hidipi enable --display 3 --size 1920x1080
+
+# 指定刷新率（系统不支持时直接报错，不会偷偷降级）
+hidipi enable --size 1920x1080 --refresh 60
+
+# 省略 --size，默认使用当前界面尺寸对应的 HiDPI 模式
+hidipi enable
+
+# 非交互场景：固定预览 5 秒后自动恢复
+hidipi enable --size 1920x1080 --seconds 5
+```
+
+### 远程桌面 / 没有实体显示器
+
+Apple Silicon Mac 可以创建独立的 HiDPI 虚拟屏幕，屏幕名称为 **HiDPI Virtual Display**：
 
 ```sh
 # 前台预览 20 秒，之后自动移除；输入 y 可保留
 hidipi virtual --size 1920x1080
 
-# 持续运行，Ctrl+C 移除虚拟屏幕并恢复仍连接的原屏幕
+# 持续运行，按 Ctrl+C 移除虚拟屏幕
 hidipi virtual --size 1920x1080 --keep
 
-# 使用虚拟屏幕作为登录自启动模式
-# 如果已经安装了物理模式的自启动，先卸载它
-hidipi autostart uninstall
+# 开机自动创建虚拟屏幕
+# （如果之前装过物理屏幕的自启动，先执行 hidipi autostart uninstall）
 hidipi autostart install --virtual --size 1920x1080
 hidipi autostart status
 ```
 
-逻辑尺寸 `1920x1080` 对应 `3840x2160` 渲染，默认请求 60 Hz。
-屏幕名称为 **HiDPI Virtual Display**。远程客户端若支持选择显示器，请选择该屏幕；
-本工具提供显示画布，不包含远程连接服务，也不会自动开启屏幕共享或修改登录设置。
-如果实体屏幕仍连接，虚拟屏幕是额外的桌面，不自动镜像到 HDMI。
+逻辑尺寸 `1920x1080` 按 `3840x2160`（2 倍像素）渲染，默认 60 Hz。
 
-虚拟屏幕也会先备份。没有实体屏幕时，保存明确的无屏幕备份；macOS 临时生成的占位桌面
-只记入元数据，不把它易变化的 ID 和模式当作硬件恢复。退出时释放虚拟屏幕；原实体屏幕
-若已拔出，保留其备份，待接回后可手动 `restore`。
+注意事项：
 
-通过 `hidipi autostart uninstall` 可停止后台虚拟屏幕、取消自启动，并恢复仍连接的原屏幕。
-**停止唯一虚拟屏幕时，远程会话可能短暂重排、改变分辨率或断开。**
+- hidipi 只负责"造屏幕"，**不包含远程连接功能**，也不会自动开启屏幕共享；
+- 在远程软件中选择 HiDPI Virtual Display 这块屏即可；
+- 如果实体屏幕仍连着，虚拟屏是额外的独立桌面，不会自动镜像；
+- 停止唯一的虚拟屏幕时，远程会话可能短暂重排或断开，请在方便重连时操作。
 
-虚拟功能使用 macOS 私有 `CGVirtualDisplay` 接口，目前支持原生 ARM64 Python。
-系统更新可能改变接口，因此实际创建后会核验逻辑尺寸及 2× 渲染尺寸，不只检查 API 返回成功。
-某些无屏幕会话不提供 CoreGraphics 模式列表，此时使用 NSScreen 的 backingScaleFactor 核验 HiDPI；
-实际刷新率无法读出时明确显示“刷新率未报告”，请求的 Hz 不代表远程视频传输帧率。
-创建者进程必须保持运行；登录自启动仍发生在进入桌面后，不能绕过 FileVault 解锁或登录。
+### 开机自动启用（登录自启动）
 
-## 登录自启动
-
-安装为工具后，在任意目录运行一次：
+安装一次，之后每次登录桌面自动启用 HiDPI，无需保留终端：
 
 ```sh
+# 启用（物理屏幕模式）
 hidipi autostart install --size 1920x1080
+
+# 查看运行状态和最近日志
 hidipi autostart status
-```
 
-安装会保存安装前的显示设置，创建 `~/Library/LaunchAgents/local.hidpi-cli.agent.plist`，
-并立即在后台启用 HiDPI。之后每次**登录桌面**自动启动，无需保留终端。
-后台进程不会出现在 Dock：长驻运行时工具会把自己降级为 UI 元素（accessory）进程。
-它不在 FileVault 解锁界面或用户登录前运行。
-
-物理模式配置绑定显示器 UUID 和安装时核验的尺寸、刷新率；系统未报告刷新率时不指定刷新率参数。登录时最多等候 60 秒。
-虚拟模式保存创建参数，不依赖实体显示器 UUID。
-多屏时安装命令可增加 `--display ID`，安装后不依赖可能变化的数字 ID。
-不需要 sudo。登录启动直接使用执行安装命令时的 Python 环境，以 `~/.config/hidpi-cli` 为工作目录，
-不会运行 uv 或联网安装依赖。通过 `hidipi autostart install` 配置时，使用 uv tool 的独立环境，
-可以移动源码仓库；如果使用 `uv run hidipi autostart install`，则仍依赖项目 `.venv`。
-升级/卸载工具前，请先 `hidipi autostart uninstall`；重新安装工具后，再安装自启动。
-
-```sh
-# 只查看将生成的配置，不写入启动项
+# 只预览将生成的配置，不实际写入
 hidipi autostart install --size 1920x1080 --dry-run
 
-# 停止后台进程、取消以后的自启动、恢复安装前设置，保留所有备份
+# 停止后台进程、取消自启动、恢复安装前的显示设置（所有备份仍保留）
 hidipi autostart uninstall
 ```
 
-卸载后可以继续用 `restore` 恢复任意历史备份。手动运行 `enable` 或 `restore` 前，
-先卸载后台服务，避免两个进程同时修改显示器。
-如果安装前备份丢失或损坏，卸载仍会停止服务并移除启动项，但会报错说明无法恢复安装前设置；可使用其他有效备份手动恢复。
-卸载会保存待恢复记录。修复备份或重新连接原显示器后，可再次运行 `hidipi autostart uninstall` 完成恢复，
-即使启动项已删除也能重试；待恢复记录完成前会拒绝新的安装，避免覆盖原恢复信息。
-安装提交启动失败或超时时会保留启动项和备份，因为后台进程可能已经启动。请先查看 `status`，
-再通过 `uninstall` 清理后重新安装。停止服务失败时也会保留启动项，供下一次卸载重试。
-正常运行日志位于 `~/.config/hidpi-cli/logs/autostart.log`，错误位于同目录的 `autostart-error.log`。
-`status` 会显示服务状态和最近日志；“已加载”不等于显示模式切换成功，请查看日志中的核验结果。
+注意：
 
-这个版本仅自动处理登录启动，不在进程退出后反复重启。物理模式拔插屏幕、睡眠唤醒导致模式变化或运行失败时，
-进程会尝试恢复并退出；可先卸载再安装重启服务。这样可以避免持续抢占你在系统设置中手动选择的模式。
+- 手动运行 `enable` / `virtual` / `restore` 前，先 `hidipi autostart uninstall`，避免两个进程同时修改显示器；
+- 升级或卸载工具前，也请先执行 `hidipi autostart uninstall`；
+- 运行日志在 `~/.config/hidpi-cli/logs/`（`autostart.log` 和 `autostart-error.log`）。
 
-## 备份与恢复
+### 恢复原样
 
-- 备份包含所有在线屏幕的 UUID、模式、渲染尺寸、刷新率、原点位置和镜像关系。
-- 每次产生独立 JSON，默认保存在 `~/.config/hidpi-cli/backups/`，不会覆盖旧备份。
-- 写入使用临时文件、`fsync`、原子重命名；回读核验完成之前不会修改显示器。
-- `restore` 在恢复前也保存一份当前状态。通过 UUID 匹配屏幕，避免重启后数字 ID 变化恢复到错误设备。
-- 正常退出、Ctrl+C、SIGTERM、SIGHUP、切换失败或预览超时，都会尝试还原并核验。
-- 显示修改使用 CoreGraphics 的进程级配置；macOS 还提供进程退出后的会话配置回退。
-  崩溃、断电或强制结束不能执行 Python 清理，不能承诺百分之百自动回退；重新运行 `restore` 可从磁盘备份恢复。
-- 恢复时如果原显示器未连接或原模式已不可用，会明确失败并保留备份；连接原屏幕后再试。
-- 不同时运行多个修改命令。先在运行中的 `enable` 终端按 Ctrl+C，然后执行独立恢复。
-- 修改命令共用用户配置目录中的 `operation.lock`，不受备份目录或 `TMPDIR` 影响；运行期间不要删除锁文件。
-- JSON 是显示模式备份，不是整个 macOS 配置备份；不备份应用窗口位置、HDR、色彩配置、亮度或显示器 OSD 设置。
-
-自定义备份目录放在子命令前：
+每次修改显示设置前，hidipi 都会自动备份一份完整快照，存放在 `~/.config/hidpi-cli/backups/`，从不覆盖：
 
 ```sh
+# 查看所有历史备份
+ls ~/.config/hidpi-cli/backups/
+
+# 用实际文件名恢复
+hidipi restore ~/.config/hidpi-cli/backups/display-20260921-153000-abcdef12.json
+
+# 只备份当前设置，不做任何修改
+hidipi backup
+```
+
+- 备份按屏幕 UUID 匹配，重启后也能恢复到正确的显示器；
+- 恢复前若原显示器没接上，会明确报错而不是乱改，接回屏幕后再试即可；
+- `restore` 执行前也会先备份一份当前状态，放心操作。
+
+## 安全机制
+
+- **先备份再动手**：每次切换前自动备份并回读核验，核验通过才会修改显示器。
+- **退出即恢复**：`Ctrl+C`、关闭终端、预览超时、切换失败，都会自动恢复原设置并核验。
+- **随时可回退**：所有备份长期保留，`hidipi restore <文件>` 一条命令回到任意历史状态。
+- **不碰系统底层**：不修改显示器 EDID、不写系统配置文件，只使用系统已有的显示模式。
+
+## 常见问题
+
+**Q：开启 HiDPI 到底有什么效果？**
+界面元素尺寸不变，但用双倍像素渲染（例如 1920×1080 的界面实际按 3840×2160 渲染），文字和图标更细腻。它不会把普通面板"变成" 4K，实际清晰度提升请以你的观感为准。
+
+**Q：为什么开了 HiDPI 刷新率变低了？**
+渲染像素翻倍，部分显示器带宽不够。例如 4K 屏在 HiDPI 模式下可能只有 50 Hz（普通模式 60 Hz）。用 `hidipi list` 可提前查看各模式刷新率；也可用 `--refresh 60` 指定，不支持时直接报错，不会静默降级。
+
+**Q：终端窗口能关吗？**
+`enable` 和 `virtual` 需要进程保持运行：关闭终端、按 `Ctrl+C` 或进程退出都会恢复原设置。想长期使用请用 `autostart install`，它后台运行、不占终端、不出现在 Dock。
+
+**Q：出问题了怎么彻底还原？**
+
+1. 结束前台进程（`Ctrl+C`），或执行 `hidipi autostart uninstall` 停止后台服务；
+2. 需要时用 `hidipi restore <备份文件>` 恢复任意历史备份。
+
+**Q：为什么切换失败，提示屏幕正在镜像？**
+hidipi 不会改动镜像组，请先在系统设置中解除镜像，再重新运行。
+
+**Q：`hidipi list` 看不到任何显示器？**
+请在已登录桌面的本机终端运行。某些受限沙箱（如 IDE 内嵌终端、远程 shell）中系统接口读不到显示器。
+
+**Q：和 BetterDisplay 有什么区别？**
+hidipi 免费、开源、零第三方依赖，专注"开启 HiDPI + 自动备份回滚"这一件事。BetterDisplay 是功能更全面的商业工具；如果你还需要缩放、色彩控制等高级功能，请使用它们。
+
+**Q：支持哪些系统？**
+macOS。实体屏幕的 HiDPI 模式通过系统公开接口启用；虚拟屏幕功能使用 macOS 私有接口，目前仅支持 Apple Silicon（原生 ARM64 Python）。
+
+## 进阶与开发
+
+```sh
+# 自定义备份目录（注意参数放在子命令前面）
 hidipi --backup-dir /path/to/backups backup
-```
 
-## 能力与限制
-
-物理模式枚举系统额外显示模式并选择真正的 HiDPI 模式（两个方向的渲染像素均至少为逻辑尺寸的两倍）。
-它能启用已有但系统设置未展示的模式，不修改实体屏幕 EDID 来添加模式；虚拟模式则独立创建显示画布。
-物理模式的目标屏幕正在镜像时会停止，避免改动镜像组。可先手动解除镜像再运行。
-
-当前机器读取到：1920×1080 普通 DPI / 60 Hz；同界面尺寸的 HiDPI 为 3840×2160 渲染 / 50 Hz。
-这表示渲染精度与刷新率之间存在取舍，不表示显示器物理面板变成 4K。
-
-只读查询在受限沙箱内可能返回零台显示器，请在本机终端运行。macOS 27 的显示 UUID 接口
-需要从 SkyLight 加载，这个兼容入口可能随 macOS 更新改变；其余模式查询与切换使用 CoreGraphics。
-
-## 验证
-
-默认测试使用模拟的显示与 Dock 接口，不切换屏幕或操作真实自启动项；原生接口测试默认跳过，可在沙箱中运行默认测试：
-
-```sh
+# 运行自动化测试（使用模拟接口，不切换真实屏幕）
 uv run python -m unittest discover -s tests -v
-```
 
-真实 Dock 接口的冒烟测试需在已登录桌面的本机终端、沙箱外显式运行：
-
-```sh
+# 真实系统接口冒烟测试（仅限已登录桌面的本机终端，勿在沙箱中运行）
 HIDPI_NATIVE_TESTS=1 uv run python -m unittest discover -s tests -p test_native.py -v
 ```
 
-该测试在独立子进程中调用 `TransformProcessType`，检查调用能否正常结束，不切换显示模式。
-受限环境中的系统接口可能直接 `abort()`，Python 无法捕获；子进程隔离可避免整个测试运行器退出，但系统仍可能生成崩溃报告。不要在沙箱中启用此测试。
+代码结构一览：`cli.py`（命令入口）、`display.py` / `virtual.py`（实体 / 虚拟屏幕流程）、`backup.py`（备份核验）、`autostart.py`（登录自启动）、`runtime.py`（进程与信号处理）、`macos.py`（macOS 系统接口）、`modes.py` / `state.py` / `errors.py`。
 
-## 代码结构与故障恢复
+2026-09 已在 M4 Mac mini / macOS 27.0 上完成实机验证：模式切换与恢复、预览超时回退、跨进程备份恢复、虚拟屏幕创建与移除均通过。更多实现细节（锁文件、状态记录、故障重试）见源码与测试。
 
-- `cli.py`：参数解析、命令分发和退出码。
-- `macos.py`：CoreGraphics、Objective-C、NSScreen 与 Dock 原生接口；导入模块时不加载系统框架。
-- `backup.py`：备份校验、原子写入及回读核验。
-- `modes.py` / `errors.py`：共享模式规则、尺寸解析与异常类型。
-- `runtime.py`：进程互斥、信号处理及预览生命周期。
-- `display.py` / `virtual.py`：实体屏幕与虚拟屏幕业务流程。
-- `autostart.py` / `state.py`：LaunchAgent 生命周期与持久化操作记录。
+## 许可证
 
-底层模块不导入 CLI。安装与卸载共用独立的 `autostart.lock`，在后台进程启动前释放显示操作锁，
-同时保持安装/卸载互斥。启动项以完整临时文件发布，拒绝覆盖已有配置。
+[MIT](LICENSE)
 
-`autostart.json` 的 `phase` 记录操作进度，不代表显示模式已核验成功：
+## 参考
 
-| 阶段 | 含义与重试方式 |
-| --- | --- |
-| `start_pending` | 已记录安装参数，尚未确认启动提交完成；检查 `status`，有启动项时先卸载再安装 |
-| `submitted` | launchctl 已接受启动请求；实际显示状态需查看日志 |
-| `stop_pending` | 正在停止服务，失败后保留配置，可重试卸载 |
-| `restore_pending` | 正在移除启动项或恢复显示设置；保留恢复路径，可重试卸载 |
-| `uninstalled` | 启动项已移除，恢复步骤已完成 |
-
-自动化测试包含模拟启动超时、停止超时、文件写入失败和恢复失败后的重试。
-
-## 历史实机验证
-
-2026-09-21 在本机 M4 Mac mini / macOS 27.0 上完成：
-
-- 34 项自动化测试通过，覆盖备份与恢复故障、自启动安装/卸载、UUID 选择、无屏幕备份、虚拟屏幕清理等。
-- 实机切换到 1920×1080 逻辑尺寸、3840×2160 渲染、50 Hz，读取当前模式核验成功。
-- 5 秒预览结束后恢复 1920×1080 渲染、60 Hz，核验成功。
-- 另起进程通过 JSON 备份执行 `restore`，核验成功。
-- 原实体屏幕不在线、macOS 提供临时占位桌面时，实机创建 1920×1080 / 3840×2160 虚拟屏幕，NSScreen 核验 2× HiDPI；5 秒后自动移除成功。
-
-测试证明系统模式切换和恢复可用；文字清晰度的主观改善仍需你查看实际屏幕。
-
-参考：
 - [Apple：CGDisplayCopyAllDisplayModes](https://developer.apple.com/documentation/coregraphics/cgdisplaycopyalldisplaymodes(_:_:))
 - [Apple：进程级显示配置回退](https://developer.apple.com/documentation/coregraphics/cgconfigureoption/forapponly)
 - [Apple：显示配置事务](https://developer.apple.com/library/archive/documentation/GraphicsImaging/Conceptual/QuartzDisplayServicesConceptual/Articles/DisplayTransactions.html)

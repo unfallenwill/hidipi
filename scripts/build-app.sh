@@ -7,7 +7,7 @@ cd "${0:A:h}/.."
 readonly APP_NAME="HidiPi"
 readonly BUNDLE_ID="local.hidipi.app"
 # CI (the release workflow) overrides the version from the tag; local builds use this default.
-readonly VERSION="${HIDIPI_VERSION:-0.3.2}"
+readonly VERSION="${HIDIPI_VERSION:-0.3.3}"
 
 echo "▸ swift build -c release"
 swift build -c release

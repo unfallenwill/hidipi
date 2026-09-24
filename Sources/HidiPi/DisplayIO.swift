@@ -32,7 +32,7 @@ enum DisplayIO {
 
     /// 当前模式。macos.current 的完整移植：虚拟屏（0xF0F0）在 CG 无模式时
     /// 回退 NSScreen（启动期 CG 可能只发布 NSScreen 数据；hz 未知记 0，
-    /// VirtualDisplayController.modeMatches 对 hz=0 容差正是为此）。
+    /// Modes.modeMatchesLenient 对 hz=0 容差正是为此）。
     /// CGDisplayCopy* 遵循 +1 约定，由 ARC 释放。
     static func currentMode(_ display: CGDirectDisplayID) -> ModeInfo? {
         if let mode = CGDisplayCopyDisplayMode(display) { return info(mode) }

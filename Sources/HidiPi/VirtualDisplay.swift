@@ -162,13 +162,13 @@ final class VirtualDisplayController {
         let actual = DisplayIO.currentMode(id)!
         NSLog("hidipi: macOS 初始虚拟模式：%@", Modes.describe(actual))
         // virtual.mode_matches：启动期 hz 可能暂缺，不应因此终止虚拟屏。
-        if !VirtualDisplayController.modeMatches(actual, expected) {
+        if !Modes.modeMatchesLenient(actual, expected) {
             let wanted = try Modes.chooseMode(DisplayIO.allModes(id).map(DisplayIO.info),
                                               size: (Int(w), Int(h)), current: actual, refresh: refresh)
             try service.setMode(id, expected: wanted)
         }
         try service.waitUntil(timeout: 5, "虚拟屏幕已创建，但 macOS 未提供要求的 HiDPI 模式") {
-            VirtualDisplayController.modeMatches(DisplayIO.currentMode(id), expected)
+            Modes.modeMatchesLenient(DisplayIO.currentMode(id), expected)
         }
         return id
     }
@@ -177,15 +177,6 @@ final class VirtualDisplayController {
         throw HiDPIError("虚拟屏幕目前支持 Apple Silicon。")
     }
     #endif
-
-    /// virtual.mode_matches：hz 容差匹配（双方都非零才比较）。
-    static func modeMatches(_ actual: ModeInfo?, _ expected: ModeInfo) -> Bool {
-        guard let a = actual else { return false }
-        let rate = (a.hz != 0 && expected.hz != 0) ? a.hz : 0
-        var adjusted = a; adjusted.hz = rate
-        var target = expected; target.hz = rate != 0 ? expected.hz : 0
-        return Modes.modeMatches(adjusted, target)
-    }
 
     /// virtual.close：释放引用（dealloc 拆除），等待下线。
     func close() {

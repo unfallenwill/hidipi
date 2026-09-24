@@ -72,6 +72,33 @@ public enum Modes {
         }!
     }
 
+    /// virtual.mode_matches：尺寸/像素同 modeMatches，但任一方刷新率未知（0）时
+    /// 跳过刷新率比较 —— 虚拟屏上线初期 CG 可能暂不报告 hz，不应因此判定失配。
+    public static func modeMatchesLenient(_ actual: ModeInfo?, _ expected: ModeInfo) -> Bool {
+        guard let a = actual else { return false }
+        let rate = (a.hz != 0 && expected.hz != 0) ? a.hz : 0
+        var adjusted = a; adjusted.hz = rate
+        var target = expected; target.hz = rate != 0 ? expected.hz : 0
+        return modeMatches(adjusted, target)
+    }
+
+    /// list_displays 的菜单去重：同一逻辑尺寸只保留一个可用 HiDPI 模式 ——
+    /// 优先与当前刷新率一致（±0.6 Hz）者，同类中取最高；结果按尺寸升序，与输入顺序无关。
+    public static func hidpiChoices(_ modes: [ModeInfo], current: ModeInfo) -> [ModeInfo] {
+        // 与 chooseMode 同序：先比是否贴近当前刷新率，再比更高刷新率（本工具链无元组比较，逐分量写）。
+        func preferred(_ a: ModeInfo, over b: ModeInfo) -> Bool {
+            let aOff = abs(a.hz - current.hz) >= 0.6, bOff = abs(b.hz - current.hz) >= 0.6
+            return aOff != bOff ? !aOff : a.hz > b.hz
+        }
+        var best: [String: ModeInfo] = [:]
+        for mode in modes where mode.usable && isHiDPI(mode) {
+            let key = "\(mode.width)x\(mode.height)"
+            if let existing = best[key], !preferred(mode, over: existing) { continue }
+            best[key] = mode
+        }
+        return best.values.sorted { ($0.width, $0.height) < ($1.width, $1.height) }
+    }
+
     /// modes.size_value：接受 1920x1080 / 1920×1080。
     public static func parseSize(_ value: String) throws -> (Int, Int) {
         let parts = value.lowercased().replacingOccurrences(of: "×", with: "x").split(separator: "x")

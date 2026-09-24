@@ -78,14 +78,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             // 被修改的显示器已断开：恢复仍连接的屏并清除状态，App 存活。
+            // 恢复失败时保留"已修改"状态（退出时会再试并提示），但必须留痕。
             if let id = self.state.modifiedDisplayID,
                (try? DisplayIO.onlineIDs())?.contains(id) == false {
-                try? self.state.restoreOriginalQuietly()
+                do {
+                    try self.state.restoreOriginalQuietly()
+                } catch {
+                    NSLog("hidipi: 显示器断开后的自动恢复失败：%@（退出时会再试；备份保留在 %@）",
+                          String(describing: error), Paths.backupDir.path)
+                }
             }
             // 虚拟屏意外消失：清除运行状态但保留偏好记录，下次登录仍会重建。
             if let controller = self.state.virtualController,
                (try? DisplayIO.onlineIDs())?.contains(controller.displayID) == false {
-                _ = try? self.state.removeVirtual(clearPreference: false)
+                do {
+                    try self.state.removeVirtual(clearPreference: false)
+                } catch {
+                    NSLog("hidipi: 虚拟屏消失后的清理失败：%@（原设置备份保留在 %@，可手动恢复）",
+                          String(describing: error), Paths.backupDir.path)
+                }
             }
             if let menu = self.statusItem.menu { self.rebuild(menu) }
         }
@@ -107,7 +118,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         appendBackupSection(menu)
         menu.addItem(.separator())
-        menu.addItem(titled("退出（恢复原始设置）", keyEquivalent: "q") { [weak self] in
+        menu.addItem(titled("退出（恢复原始设置）", keyEquivalent: "q") {
             NSApp.terminate(nil)
         })
     }

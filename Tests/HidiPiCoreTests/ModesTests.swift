@@ -45,6 +45,37 @@ import Testing
     }
 }
 
+@Test func modeMatchesLenientSkipsUnknownRate() {
+    let expected = ModeInfo(width: 1920, height: 1080, pixelWidth: 3840, pixelHeight: 2160, hz: 60)
+    let noRate = ModeInfo(width: 1920, height: 1080, pixelWidth: 3840, pixelHeight: 2160, hz: 0)
+    // 任一方 hz 未知（0）→ 跳过刷新率比较
+    #expect(Modes.modeMatchesLenient(noRate, expected))
+    #expect(Modes.modeMatchesLenient(expected, noRate))
+    // 双方已知 → 回到 0.6 Hz 容差
+    let off = ModeInfo(width: 1920, height: 1080, pixelWidth: 3840, pixelHeight: 2160, hz: 100)
+    #expect(!Modes.modeMatchesLenient(off, expected))
+    #expect(!Modes.modeMatchesLenient(nil, expected))
+}
+
+@Test func hidpiChoicesDedupsPerSize() {
+    let current = ModeInfo(width: 2560, height: 1440, pixelWidth: 2560, pixelHeight: 1440, hz: 60)
+    let hi60 = ModeInfo(width: 1920, height: 1080, pixelWidth: 3840, pixelHeight: 2160, hz: 60)
+    let hi100 = ModeInfo(width: 1920, height: 1080, pixelWidth: 3840, pixelHeight: 2160, hz: 100)
+    let hi50 = ModeInfo(width: 1920, height: 1080, pixelWidth: 3840, pixelHeight: 2160, hz: 50)
+    let qhd = ModeInfo(width: 2560, height: 1440, pixelWidth: 5120, pixelHeight: 2880, hz: 60)
+    let lodpi = ModeInfo(width: 1280, height: 720, pixelWidth: 1280, pixelHeight: 720, hz: 60)
+    let unusable = ModeInfo(width: 3840, height: 2160, pixelWidth: 7680, pixelHeight: 4320,
+                            hz: 60, usable: false)
+    // 同尺寸：与当前刷新率一致者优先于更高刷新率（与传入顺序无关）
+    #expect(Modes.hidpiChoices([hi100, hi60], current: current).map(\.hz) == [60])
+    #expect(Modes.hidpiChoices([hi60, hi100], current: current).map(\.hz) == [60])
+    // 同尺寸都不接近当前刷新率：取最高
+    #expect(Modes.hidpiChoices([hi50, hi100], current: current).map(\.hz) == [100])
+    // 不可用与 LoDPI 过滤；结果按尺寸升序
+    #expect(Modes.hidpiChoices([qhd, hi60, lodpi, unusable], current: current)
+        .map { "\($0.width)x\($0.height)" } == ["1920x1080", "2560x1440"])
+}
+
 @Test func parseSize() throws {
     #expect(try Modes.parseSize("1920x1080").0 == 1920)
     #expect(try Modes.parseSize("1920×1080").1 == 1080)

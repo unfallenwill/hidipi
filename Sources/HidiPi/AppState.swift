@@ -1,6 +1,6 @@
 /// 应用状态与全部操作流程（enable / virtual / restore / quit）。
-/// 遵循 Python 版语义：同一时刻只有一种修改（物理屏或虚拟屏其一），
-/// 退出或移除时按备份恢复。所有方法必须在主线程调用。
+/// 遵循 Python 版语义：同一时刻只有一种修改（物理屏或虚拟屏其一，由入口 guard 强制，
+/// 不依赖菜单禁用），退出或移除时按备份恢复。所有方法必须在主线程调用。
 import Foundation
 import HidiPiCore
 import CoreGraphics
@@ -24,6 +24,19 @@ final class AppState {
     var physicalModified: Bool { originalSnapshot != nil }
     var virtualActive: Bool { virtualController != nil }
 
+    // —— 重入保护 ——
+    // waitUntil 泵 runloop、NSAlert.runModal 都会嵌套事件循环，菜单动作可能在
+    // 操作进行中再次触发；此标志保证"同一时刻只一种修改"不靠菜单禁用维持。
+    private var operationInProgress = false
+
+    /// 修改操作的入口互斥：已在操作中则拒绝重入。
+    private func beginOperation() throws {
+        guard !operationInProgress else {
+            throw HiDPIError("上一个操作尚未完成；请稍候再试。")
+        }
+        operationInProgress = true
+    }
+
     /// 启动时获取与 Python 版互斥的操作锁。
     func acquireLock() throws {
         lock = try OperationLock(filename: "operation.lock")
@@ -33,6 +46,11 @@ final class AppState {
 
     /// target 来自刚刷新的快照；wanted 为菜单选择的 HiDPI 模式。
     func enableHiDPI(on target: DisplaySnapshot, wanted: ModeInfo) throws {
+        guard !virtualActive else {
+            throw HiDPIError("虚拟屏幕运行中；请先移除虚拟屏幕，再修改物理显示器。")
+        }
+        try beginOperation()
+        defer { operationInProgress = false }
         guard !target.inMirrorSet else {
             throw HiDPIError("目标显示器正在镜像。请先在系统设置中解除镜像，再切换 HiDPI。")
         }
@@ -64,6 +82,11 @@ final class AppState {
     // MARK: - 虚拟屏（移植 virtual.run）
 
     func createVirtual(size: (Int, Int)) throws {
+        guard !physicalModified else {
+            throw HiDPIError("物理显示器修改尚未恢复；请先退出物理屏修改，再创建虚拟屏幕。")
+        }
+        try beginOperation()
+        defer { operationInProgress = false }
         try VirtualDisplayController.validateOptions(size: size, refresh: 60)
         let original = try VirtualDisplay.captureOriginal(service)
         let backup = try Backup.write(original, to: Paths.backupDir)
@@ -89,6 +112,8 @@ final class AppState {
     /// 意外消失的清理路径为 false（保住记录，下次登录仍会重建）。
     func removeVirtual(clearPreference: Bool = true) throws {
         guard let controller = virtualController else { return }
+        try beginOperation()
+        defer { operationInProgress = false }
         virtualController = nil
         controller.close()
         let original = virtualOriginal
@@ -119,6 +144,8 @@ final class AppState {
     // MARK: - 从备份恢复（移植 cli 的 restore 分支）
 
     func restore(from url: URL) throws {
+        try beginOperation()
+        defer { operationInProgress = false }
         let saved = try Backup.decode(try Data(contentsOf: url))
         let currentBackup = try Backup.write(try service.snapshot(), to: Paths.backupDir)
         NSLog("hidipi: 恢复前的状态也已备份：%@", currentBackup.path)
@@ -172,27 +199,10 @@ final class AppState {
         var label: String { "\(mode.width)×\(mode.height)（\(Modes.formatG(mode.hz)) Hz）" }
     }
 
-    /// list_displays 的菜单版：按逻辑尺寸去重（每尺寸取与当前刷新率最接近者，其次最高）。
+    /// list_displays 的菜单版：模式枚举走 CG，去重/排序纯逻辑在 Modes.hidpiChoices。
     static func hidpiOptions(for display: DisplaySnapshot) -> [ModeOption] {
         guard let current = display.mode else { return [] }
-        let hidpi = DisplayIO.allModes(display.id).map(DisplayIO.info).filter {
-            $0.usable && Modes.isHiDPI($0)
-        }
-        var best: [String: ModeInfo] = [:]
-        for mode in hidpi {
-            let key = "\(mode.width)x\(mode.height)"
-            if let existing = best[key] {
-                let preferNew = (abs(mode.hz - current.hz) < 0.6) != (abs(existing.hz - current.hz) < 0.6)
-                if preferNew || (mode.hz > existing.hz &&
-                    abs(mode.hz - current.hz) >= 0.6 && abs(existing.hz - current.hz) >= 0.6) {
-                    best[key] = mode
-                }
-            } else {
-                best[key] = mode
-            }
-        }
-        return best.values
-            .sorted { ($0.width, $0.height) < ($1.width, $1.height) }
+        return Modes.hidpiChoices(DisplayIO.allModes(display.id).map(DisplayIO.info), current: current)
             .map { ModeOption(mode: $0) }
     }
 }

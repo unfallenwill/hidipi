@@ -21,7 +21,8 @@ xcrun llvm-profdata merge -sparse "$CODECOV"/*.profraw -o "$PROFDATA"
 
 setopt null_glob
 ARGS=()
-for binary in .build/debug/*.xctest/Contents/MacOS/*; do
+# Only regular files: bundle MacOS directories can also hold .dSYM bundles on CI.
+for binary in .build/debug/*.xctest/Contents/MacOS/*(N-.); do
   ARGS+=(-object "$binary")
 done
 

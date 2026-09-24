@@ -141,3 +141,15 @@ private func onMain(_ body: () throws -> Void) rethrows {
         try DispatchQueue.main.sync { try body() }
     }
 }
+
+@Test func rebuildGathersLiveStateIntoTheMenu() throws {
+    try onMain {
+        let delegate = AppDelegate(state: AppState())
+        let menu = NSMenu()
+        delegate.rebuild(menu)
+        let titles = menu.items.map(\.title)
+        #expect(titles.contains("About HidiPi"))
+        #expect(titles.contains("Quit (Restore Original Settings)"))
+        #expect(!(titles.first ?? "").isEmpty)   // a status row is always present
+    }
+}

@@ -72,4 +72,37 @@ struct IntegrationTests {
         #expect(!state.physicalModified)
         try state.teardown()
     }
+
+    /// The full flow the menu drives: a real switch to a different mode (via
+    /// hidpiOptions when one exists, otherwise re-applying the current mode), then
+    /// teardown restoring the original state.
+    @Test func enableHiDPIFullFlowRestoresOnTeardown() throws {
+        let state = AppState()
+        let snapshot = try state.service.snapshot()
+        guard let display = snapshot.displays.first(where: { $0.vendor != VirtualBridge.vendorID }),
+              let current = display.mode else { return }
+        let wanted = AppState.hidpiOptions(for: display).first?.mode ?? current
+        try state.enableHiDPI(on: display, wanted: wanted)
+        if !Modes.modeMatches(current, wanted) {
+            #expect(state.physicalModified)
+        }
+        try state.teardown()
+        #expect(!state.physicalModified)
+        #expect(Modes.modeMatches(DisplayIO.currentMode(display.id), current))
+    }
+
+    /// createVirtual either succeeds or is refused by the environment (CI runners never
+    /// bring the display online); either way the app must be left in a clean state.
+    @Test func createVirtualAttemptLeavesCleanState() throws {
+        let state = AppState()
+        do {
+            try state.createVirtual(size: (1920, 1080))
+            #expect(state.virtualActive)
+        } catch {
+            #expect(!state.virtualActive)   // rolled back
+        }
+        try state.teardown()
+        #expect(!state.virtualActive)
+        try state.teardown()   // idempotent
+    }
 }

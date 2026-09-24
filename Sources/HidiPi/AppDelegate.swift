@@ -1,4 +1,6 @@
-/// Menu-bar app core: status item, menu, display reconfiguration callbacks and quit-time restore.
+/// Menu-bar app core: status item, menu rendering, display reconfiguration callbacks and
+/// quit-time restore. Menu structure decisions live in MenuModel (pure, tested); this
+/// type gathers state and renders it into NSMenu items with actions wired.
 import AppKit
 import CoreGraphics
 import HidiPiCore
@@ -13,9 +15,15 @@ final class MenuItemAction: NSObject {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
-    private let state = AppState()
+    let state: AppState
     private var actions: [MenuItemAction] = []   // kept alive while the menu exists
     private var reconfigurationCallback: CGDisplayReconfigurationCallBack?
+
+    /// state is injectable for tests; production always uses a fresh AppState.
+    init(state: AppState = AppState()) {
+        self.state = state
+        super.init()
+    }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         do {
@@ -114,87 +122,59 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    // MARK: - Menu construction
+    // MARK: - Menu rendering
 
-    private func rebuild(_ menu: NSMenu) {
+    private func currentState() -> MenuState {
+        MenuState(snapshot: try? state.service.snapshot(),
+                  virtualActive: state.virtualActive,
+                  virtualSize: state.virtualSize,
+                  physicalModified: state.physicalModified,
+                  modifiedDisplayID: state.modifiedDisplayID,
+                  loginItemEnabled: LoginItem.isEnabled)
+    }
+
+    func rebuild(_ menu: NSMenu) {
         menu.removeAllItems()
         actions.removeAll()
-        let snapshot = try? state.service.snapshot()
-        appendStatus(menu, snapshot: snapshot)
-        menu.addItem(.separator())
-        appendPhysicalSections(menu, snapshot: snapshot)
-        menu.addItem(.separator())
-        appendVirtualSection(menu)
-        menu.addItem(.separator())
-        appendLoginItemSection(menu)
-        menu.addItem(.separator())
-        menu.addItem(titled("About HidiPi") { [weak self] in
-            self?.showAbout()
-        })
-        menu.addItem(titled("Quit (Restore Original Settings)", keyEquivalent: "q") {
-            NSApp.terminate(nil)
-        })
+        render(MenuModel.build(currentState()), into: menu)
     }
 
-    private func appendStatus(_ menu: NSMenu, snapshot: DisplayState?) {
-        var text = "No display changes active"
-        if state.virtualActive, let size = state.virtualSize {
-            text = "Virtual display active: \(size.0)×\(size.1), HiDPI"
-        } else if let id = state.modifiedDisplayID,
-                  let current = DisplayIO.currentMode(id) {
-            text = Modes.describe(current)
-        } else if let only = snapshot?.displays.first, snapshot?.displays.count == 1 {
-            text = Modes.describe(only.mode)
-        }
-        addDisabled(menu, text)
-    }
-
-    private func appendPhysicalSections(_ menu: NSMenu, snapshot: DisplayState?) {
-        guard let displays = snapshot?.displays, !displays.isEmpty else {
+    func render(_ model: MenuModel, into menu: NSMenu) {
+        addDisabled(menu, model.statusText)
+        menu.addItem(.separator())
+        if model.noDisplays {
             addDisabled(menu, "No online displays detected")
-            return
-        }
-        for display in displays where display.vendor != VirtualBridge.vendorID {
-            let title = "Display \(display.id) (\(display.main ? "main" : "secondary"))"
-            let submenu = NSMenu()
-            if state.virtualActive {
-                addDisabled(submenu, "Remove the virtual display first")
-            } else if display.inMirrorSet {
-                addDisabled(submenu, "Mirroring active; disable it in System Settings first")
-            } else {
-                let options = AppState.hidpiOptions(for: display)
-                if options.isEmpty {
-                    addDisabled(submenu, "No HiDPI modes available")
+        } else {
+            for section in model.displaySections {
+                let submenu = NSMenu()
+                if let hint = section.hint {
+                    addDisabled(submenu, hint)
                 } else {
-                    for option in options {
-                        let item = titled(option.label)
-                        item.state = Modes.modeMatches(display.mode, option.mode) ? .on : .off
-                        bind(item) { [weak self] in
-                            self?.run(.enableHiDPI(display: display, wanted: option.mode))
+                    for option in section.options {
+                        let entry = titled(option.title)
+                        entry.state = option.checked ? .on : .off
+                        bind(entry) { [weak self] in
+                            self?.run(.enableHiDPI(display: option.display, wanted: option.mode))
                         }
-                        submenu.addItem(item)
+                        submenu.addItem(entry)
                     }
                 }
+                menu.addItem(withTitle: section.title, action: nil, keyEquivalent: "").submenu = submenu
             }
-            menu.addItem(withTitle: title, action: nil, keyEquivalent: "").submenu = submenu
         }
-    }
-
-    private func appendVirtualSection(_ menu: NSMenu) {
-        if state.virtualActive {
-            addDisabled(menu, "✓ Virtual display active" +
-                (state.virtualSize.map { ": \($0.0)×\($0.1)" } ?? ""))
+        menu.addItem(.separator())
+        if model.virtualActive {
+            addDisabled(menu, model.virtualTitle)
             menu.addItem(titled("Remove Virtual Display") { [weak self] in
                 self?.run(.removeVirtual)
             })
         } else {
-            let item = titled(state.physicalModified
-                ? "Virtual Display (restore physical changes first)" : "Virtual Display")
-            item.isEnabled = !state.physicalModified
+            let item = titled(model.virtualTitle)
+            item.isEnabled = model.virtualEnabled
             let submenu = NSMenu()
-            for size in [(1920, 1080), (2560, 1440)] {
+            for size in model.createSizes {
                 let entry = titled("Create \(size.0)×\(size.1), HiDPI")
-                entry.isEnabled = !state.physicalModified
+                entry.isEnabled = model.virtualEnabled
                 bind(entry) { [weak self] in
                     self?.run(.createVirtual(size: size))
                 }
@@ -203,12 +183,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             item.submenu = submenu
             menu.addItem(item)
         }
-    }
-
-    private func appendLoginItemSection(_ menu: NSMenu) {
-        let item = titled("Start at Login")
-        item.state = LoginItem.isEnabled ? .on : .off
-        bind(item) { [weak self] in
+        menu.addItem(.separator())
+        let login = titled("Start at Login")
+        login.state = model.loginItemChecked ? .on : .off
+        bind(login) { [weak self] in
             guard let self else { return }
             do {
                 try LoginItem.setEnabled(!LoginItem.isEnabled)
@@ -217,7 +195,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             // No rebuild needed: the menu re-renders on next open (menuWillOpen).
         }
-        menu.addItem(item)
+        menu.addItem(login)
+        menu.addItem(.separator())
+        menu.addItem(titled("About HidiPi") { [weak self] in
+            self?.showAbout()
+        })
+        menu.addItem(titled("Quit (Restore Original Settings)", keyEquivalent: "q") {
+            NSApp.terminate(nil)
+        })
     }
 
     // MARK: - About panel

@@ -37,3 +37,8 @@ import HidiPiCore
     let uuid = try DisplayUUID.string(for: main)
     #expect(UUID(uuidString: uuid) != nil)
 }
+
+@Test func loginItemStatusReadsSMAppService() {
+    // Reads the real registration state; must not throw or crash.
+    _ = LoginItem.isEnabled
+}

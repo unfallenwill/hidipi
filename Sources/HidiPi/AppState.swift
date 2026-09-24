@@ -160,16 +160,11 @@ final class AppState {
 
     // MARK: - Menu data
 
-    struct ModeOption {
-        let mode: ModeInfo
-        var label: String { "\(mode.width)×\(mode.height) (\(Modes.formatG(mode.hz)) Hz)" }
-    }
-
     /// The menu version of list_displays: mode enumeration goes through CG; the
     /// dedup/sorting pure logic lives in Modes.hidpiChoices.
     static func hidpiOptions(for display: DisplaySnapshot) -> [ModeOption] {
         guard let current = display.mode else { return [] }
         return Modes.hidpiChoices(DisplayIO.allModes(display.id).map(DisplayIO.info), current: current)
-            .map { ModeOption(mode: $0) }
+            .map { ModeOption(display: display, mode: $0) }
     }
 }

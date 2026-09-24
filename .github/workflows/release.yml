@@ -9,8 +9,9 @@ on:
     tags: ["v*"]
 
 permissions:
-  contents: write   # gh release: create the Release and upload assets
-  id-token: write   # attest-build-provenance's Sigstore keyless signing
+  contents: write       # gh release: create the Release and upload assets
+  id-token: write       # attest-build-provenance's Sigstore keyless signing
+  attestations: write   # persisting attestations via the REST API
 
 jobs:
   dmg:

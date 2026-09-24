@@ -19,5 +19,13 @@ let package = Package(
             name: "HidiPiCoreTests",
             dependencies: ["HidiPiCore"]
         ),
+        .testTarget(
+            name: "HidiPiIconTests",
+            dependencies: ["HidiPiIcon"]
+        ),
+        .testTarget(
+            name: "HidiPiTests",
+            dependencies: ["HidiPi"]
+        ),
     ]
 )

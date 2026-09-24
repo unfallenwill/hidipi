@@ -61,35 +61,23 @@ struct DisplayService {
         }
     }
 
-    /// macos.restore: resolve by UUID, pre-check every display, then restore mode/layout/
-    /// mirroring in a single transaction and verify.
+    /// macos.restore: resolve by UUID, pre-check every display (RestorePlanner), then
+    /// restore mode/layout/mirroring in a single transaction and verify.
     func restore(_ state: DisplayState) throws {
         let live = try Dictionary(uniqueKeysWithValues: DisplayIO.onlineIDs().map {
             (try DisplayUUID.string(for: $0), $0)
         })
-        // Pre-check everything before touching any display; mode_id only breaks ties
-        // (it changes across reboots). CGDisplayMode references are held by the array
-        // (CF bridging +0), no manual release needed.
+        // Pre-check everything before touching any display; mode_id only breaks ties.
+        let planned = try RestorePlanner.plan(state, online: live) {
+            DisplayIO.allModes($0).map(DisplayIO.info)
+        }
         var entries: [(id: CGDirectDisplayID, mode: CGDisplayMode, saved: DisplaySnapshot)] = []
-        for saved in state.displays {
-            guard let display = live[saved.uuid] else {
-                throw HiDPIError("Display \(saved.uuid) from the snapshot is not connected; reconnect it and retry.")
+        for entry in planned {
+            guard let mode = DisplayIO.allModes(entry.display)
+                .first(where: { Modes.modeMatches(DisplayIO.info($0), entry.mode) }) else {
+                throw HiDPIError("The original mode for display \(entry.display) is currently unavailable: \(Modes.describe(entry.mode))")
             }
-            guard let wanted = saved.mode else {
-                throw HiDPIError("The snapshot is missing the original mode; cannot fully restore.")
-            }
-            let matches = DisplayIO.allModes(display).filter {
-                Modes.modeMatches(DisplayIO.info($0), wanted)
-            }
-            guard let best = matches.min(by: {
-                // Python: mode_id is only a tie-breaker; the matching one sorts first.
-                let l = DisplayIO.info($0).modeID != wanted.modeID
-                let r = DisplayIO.info($1).modeID != wanted.modeID
-                return l != r ? !l : false
-            }) else {
-                throw HiDPIError("The original mode for display \(display) is currently unavailable: \(Modes.describe(wanted))")
-            }
-            entries.append((display, best, saved))
+            entries.append((entry.display, mode, entry.target))
         }
 
         var config: CGDisplayConfigRef?

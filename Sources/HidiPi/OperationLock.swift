@@ -14,9 +14,10 @@ final class OperationLock {
     private let fd: Int32
 
     /// A thrown error means the lock is held (another HiDPI operation is running).
-    init() throws {
-        let path = Paths.operationLock
-        try FileManager.default.createDirectory(at: Paths.configDir, withIntermediateDirectories: true,
+    /// The path is injectable for tests; production always locks Paths.operationLock.
+    init(path: URL = Paths.operationLock) throws {
+        try FileManager.default.createDirectory(at: path.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true,
                                                 attributes: [.posixPermissions: 0o700])
         let descriptor = Darwin.open(path.path, O_CREAT | O_RDWR, 0o600)
         guard descriptor >= 0 else {

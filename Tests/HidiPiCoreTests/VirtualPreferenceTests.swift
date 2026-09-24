@@ -2,6 +2,14 @@ import Foundation
 import Testing
 @testable import HidiPiCore
 
+@Test func defaultURLLivesInConfigDir() {
+    #expect(VirtualPreference.url.deletingLastPathComponent() == Paths.configDir)
+    // Reading the real default location must never yield garbage.
+    if let size = VirtualPreference.load() {
+        #expect((640...7680).contains(size.0) && (480...4320).contains(size.1))
+    }
+}
+
 @Test func virtualPreferenceRoundTrip() throws {
     let file = FileManager.default.temporaryDirectory
         .appendingPathComponent("virtual-\(UUID().uuidString).json")

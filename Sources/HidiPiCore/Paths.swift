@@ -1,5 +1,5 @@
-/// 移植 hidipi/src/hidipi/state.py 的路径部分。
-/// 与 Python 版共用 ~/.config/hidipi，备份与锁互操作。
+/// Port of the path section of hidipi/src/hidipi/state.py.
+/// Shares ~/.config/hidipi with the Python version; backups and the lock interoperate.
 import Foundation
 
 public enum Paths {

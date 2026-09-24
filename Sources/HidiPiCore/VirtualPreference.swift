@@ -1,6 +1,7 @@
-/// 虚拟屏的"期望状态"记录（~/.config/hidipi/virtual.json）。
-/// 创建成功即记下尺寸；登录自启动后据此自动重建；显式移除才清除。
-/// 与 Python 版的 autostart.json 各自独立，互不干扰。
+/// The virtual display's "desired state" record (~/.config/hidipi/virtual.json).
+/// The size is recorded on successful creation; login-autostart rebuilds from it;
+/// only an explicit removal clears it.
+/// Independent of the Python version's autostart.json; the two never interfere.
 import Foundation
 
 public enum VirtualPreference {
@@ -8,7 +9,7 @@ public enum VirtualPreference {
         Paths.configDir.appendingPathComponent("virtual.json")
     }
 
-    /// 读取期望尺寸；缺失或非法时返回 nil。
+    /// Load the desired size; nil when missing or invalid.
     public static func load(from file: URL = url) -> (Int, Int)? {
         guard let data = try? Data(contentsOf: file),
               let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
@@ -17,7 +18,7 @@ public enum VirtualPreference {
         return (size[0], size[1])
     }
 
-    /// 原子写入期望尺寸（目录已由锁创建，权限 0600）。
+    /// Atomically write the desired size (directory already exists with the lock; mode 0600).
     public static func save(_ size: (Int, Int), to file: URL = url) throws {
         let payload = try JSONSerialization.data(withJSONObject: ["size": [size.0, size.1]],
                                                  options: [.prettyPrinted, .sortedKeys])
@@ -25,7 +26,7 @@ public enum VirtualPreference {
         try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
     }
 
-    /// 清除期望状态（用户显式移除虚拟屏时调用）。
+    /// Clear the desired state (called when the user explicitly removes the virtual display).
     public static func clear(at file: URL = url) {
         try? FileManager.default.removeItem(at: file)
     }

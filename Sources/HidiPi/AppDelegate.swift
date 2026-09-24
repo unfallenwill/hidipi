@@ -1,10 +1,10 @@
-/// 菜单栏 App 本体：状态项、菜单、显示器重配置回调与退出恢复。
+/// Menu-bar app core: status item, menu, display reconfiguration callbacks and quit-time restore.
 import AppKit
 import CoreGraphics
 import HidiPiCore
 import HidiPiIcon
 
-/// NSMenuItem 动作的闭包承载（target-action 必须是 ObjC 对象）。
+/// Closure carrier for NSMenuItem actions (target-action requires an ObjC object).
 final class MenuItemAction: NSObject {
     private let handler: () -> Void
     init(_ handler: @escaping () -> Void) { self.handler = handler }
@@ -14,7 +14,7 @@ final class MenuItemAction: NSObject {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private let state = AppState()
-    private var actions: [MenuItemAction] = []   // 菜单重建期间保持强引用
+    private var actions: [MenuItemAction] = []   // kept alive while the menu exists
     private var reconfigurationCallback: CGDisplayReconfigurationCallBack?
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -22,15 +22,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             try state.teardown()
             return .terminateNow
         } catch {
-            let choice = confirm("退出时未能完全恢复",
-                "恢复未完成：\(error)\n\n所有备份仍保留在 \(Paths.backupDir.path)，"
-                + "可随时从菜单或 Python 版 hidipi restore 手动恢复。仍要退出吗？",
-                confirmButton: "退出", cancelButton: "取消")
+            let choice = confirm("Restore incomplete on quit",
+                "Restore did not fully complete: \(error)\n\nPhysical mode changes still revert "
+                + "automatically once the app exits. Quit anyway?",
+                confirmButton: "Quit", cancelButton: "Cancel")
             return choice ? .terminateNow : .terminateCancel
         }
     }
 
-    // MARK: - 显示器变化回调（替代 Python 预览循环的看门狗）
+    // MARK: - Display change callbacks (replacing the Python preview loop's watchdog)
 
     private func registerReconfigurationCallback() {
         reconfigurationCallback = { _, _, _ in
@@ -48,8 +48,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             try state.acquireLock()
         } catch {
-            NSLog("hidipi: 启动失败：%@", String(describing: error))
-            alert("无法启动", String(describing: error))
+            NSLog("hidipi: startup failed: %@", String(describing: error))
+            alert("Cannot Start", String(describing: error))
             NSApp.terminate(nil)
             return
         }
@@ -62,13 +62,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.menu = menu
         registerReconfigurationCallback()
         rebuild(menu)
-        // 登录自启动场景：按偏好记录自动重建虚拟屏（主循环就绪后执行）。
+        // Login-autostart path: rebuild the virtual display from the recorded preference
+        // (after the main loop is up and running).
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             if let error = self.state.restorePreferredVirtual() {
-                self.alert("自动重建虚拟屏幕失败",
-                    "\(error)\n\n可在菜单中手动重试创建。偏好记录仍保留在 "
-                    + "\(VirtualPreference.url.path)。")
+                self.alert("Virtual Display Auto-Rebuild Failed",
+                    "\(error)\n\nYou can retry from the menu. The preference record is kept at "
+                    + "\(VirtualPreference.url.path).")
             }
             if let menu = self.statusItem.menu { self.rebuild(menu) }
         }
@@ -77,32 +78,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func onDisplayReconfiguration() {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            // 被修改的显示器已断开：恢复仍连接的屏并清除状态，App 存活。
-            // 恢复失败时保留"已修改"状态（退出时会再试并提示），但必须留痕。
+            // The modified display went away: restore the still-connected ones and clear
+            // state; the app stays alive. On failure, state is kept (quit retries it) — log it.
             if let id = self.state.modifiedDisplayID,
                (try? DisplayIO.onlineIDs())?.contains(id) == false {
                 do {
                     try self.state.restoreOriginalQuietly()
                 } catch {
-                    NSLog("hidipi: 显示器断开后的自动恢复失败：%@（退出时会再试；备份保留在 %@）",
-                          String(describing: error), Paths.backupDir.path)
+                    NSLog("hidipi: auto-restore after display disconnect failed: %@ (state kept, retried on quit)",
+                          String(describing: error))
                 }
             }
-            // 虚拟屏意外消失：清除运行状态但保留偏好记录，下次登录仍会重建。
+            // The virtual display vanished unexpectedly: clear runtime state but keep the
+            // preference record so the next login still rebuilds it.
             if let controller = self.state.virtualController,
                (try? DisplayIO.onlineIDs())?.contains(controller.displayID) == false {
                 do {
                     try self.state.removeVirtual(clearPreference: false)
                 } catch {
-                    NSLog("hidipi: 虚拟屏消失后的清理失败：%@（原设置备份保留在 %@，可手动恢复）",
-                          String(describing: error), Paths.backupDir.path)
+                    NSLog("hidipi: virtual display cleanup failed: %@ (state kept, retried on quit)",
+                          String(describing: error))
                 }
             }
             if let menu = self.statusItem.menu { self.rebuild(menu) }
         }
     }
 
-    // MARK: - 菜单构建
+    // MARK: - Menu construction
 
     private func rebuild(_ menu: NSMenu) {
         menu.removeAllItems()
@@ -116,17 +118,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         appendLoginItemSection(menu)
         menu.addItem(.separator())
-        appendBackupSection(menu)
-        menu.addItem(.separator())
-        menu.addItem(titled("退出（恢复原始设置）", keyEquivalent: "q") {
+        menu.addItem(titled("About HidiPi") { [weak self] in
+            self?.showAbout()
+        })
+        menu.addItem(titled("Quit (Restore Original Settings)", keyEquivalent: "q") {
             NSApp.terminate(nil)
         })
     }
 
     private func appendStatus(_ menu: NSMenu, snapshot: BackupSnapshot?) {
-        var text = "未修改显示设置"
+        var text = "No display changes active"
         if state.virtualActive, let size = state.virtualSize {
-            text = "虚拟屏幕运行中：\(size.0)×\(size.1)，HiDPI"
+            text = "Virtual display active: \(size.0)×\(size.1), HiDPI"
         } else if let id = state.modifiedDisplayID,
                   let current = DisplayIO.currentMode(id) {
             text = Modes.describe(current)
@@ -138,20 +141,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func appendPhysicalSections(_ menu: NSMenu, snapshot: BackupSnapshot?) {
         guard let displays = snapshot?.displays, !displays.isEmpty else {
-            addDisabled(menu, "未读取到在线显示器")
+            addDisabled(menu, "No online displays detected")
             return
         }
         for display in displays where display.vendor != VirtualBridge.vendorID {
-            let title = "显示器 \(display.id)（\(display.main ? "主屏" : "副屏")）"
+            let title = "Display \(display.id) (\(display.main ? "main" : "secondary"))"
             let submenu = NSMenu()
             if state.virtualActive {
-                addDisabled(submenu, "请先移除虚拟屏幕")
+                addDisabled(submenu, "Remove the virtual display first")
             } else if display.inMirrorSet {
-                addDisabled(submenu, "正在镜像，请先在系统设置解除")
+                addDisabled(submenu, "Mirroring active; disable it in System Settings first")
             } else {
                 let options = AppState.hidpiOptions(for: display)
                 if options.isEmpty {
-                    addDisabled(submenu, "无可用 HiDPI 模式")
+                    addDisabled(submenu, "No HiDPI modes available")
                 } else {
                     for option in options {
                         let item = titled(option.label)
@@ -169,17 +172,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func appendVirtualSection(_ menu: NSMenu) {
         if state.virtualActive {
-            addDisabled(menu, "✓ 虚拟屏幕运行中" +
-                (state.virtualSize.map { "：\($0.0)×\($0.1)" } ?? ""))
-            menu.addItem(titled("移除虚拟屏幕") { [weak self] in
+            addDisabled(menu, "✓ Virtual display active" +
+                (state.virtualSize.map { ": \($0.0)×\($0.1)" } ?? ""))
+            menu.addItem(titled("Remove Virtual Display") { [weak self] in
                 self?.run(.removeVirtual)
             })
         } else {
-            let item = titled(state.physicalModified ? "虚拟屏幕（请先退出物理屏修改）" : "虚拟屏幕")
+            let item = titled(state.physicalModified
+                ? "Virtual Display (restore physical changes first)" : "Virtual Display")
             item.isEnabled = !state.physicalModified
             let submenu = NSMenu()
             for size in [(1920, 1080), (2560, 1440)] {
-                let entry = titled("创建 \(size.0)×\(size.1)，HiDPI")
+                let entry = titled("Create \(size.0)×\(size.1), HiDPI")
                 entry.isEnabled = !state.physicalModified
                 bind(entry) { [weak self] in
                     self?.run(.createVirtual(size: size))
@@ -192,74 +196,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func appendLoginItemSection(_ menu: NSMenu) {
-        let item = titled("登录时启动")
+        let item = titled("Start at Login")
         item.state = LoginItem.isEnabled ? .on : .off
         bind(item) { [weak self] in
             guard let self else { return }
             do {
                 try LoginItem.setEnabled(!LoginItem.isEnabled)
             } catch {
-                self.alert("登录启动", String(describing: error))
+                self.alert("Login Item", String(describing: error))
             }
             if let menu = self.statusItem.menu { self.rebuild(menu) }
         }
         menu.addItem(item)
     }
 
-    private func appendBackupSection(_ menu: NSMenu) {
-        let item = titled("从备份恢复…")
-        let entries = Self.recentBackups(limit: 8)
-        guard !entries.isEmpty else {
-            item.isEnabled = false
-            return
+    // MARK: - About panel
+
+    private func showAbout() {
+        NSApp.activate(ignoringOtherApps: true)
+        var options: [NSApplication.AboutPanelOptionKey: Any] = [.applicationName: "HidiPi"]
+        if let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String {
+            options[.version] = version
         }
-        let submenu = NSMenu()
-        for entry in entries {
-            let entryItem = titled(entry.label)
-            bind(entryItem) { [weak self] in
-                self?.run(.restore(url: entry.url))
-            }
-            submenu.addItem(entryItem)
-        }
-        item.submenu = submenu
-        menu.addItem(item)
+        options[.credits] = NSAttributedString(
+            string: "Menu-bar HiDPI control for physical and virtual displays.\n"
+                + "https://github.com/unfallenwill/hidipi",
+            attributes: [.font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)])
+        NSApp.orderFrontStandardAboutPanel(options: options)
     }
 
-    struct BackupEntry {
-        let url: URL
-        let label: String
-    }
-
-    /// 最近备份：文件名解析时间，读文件数显示器台数（读不动则标 ?）。
-    static func recentBackups(limit: Int) -> [BackupEntry] {
-        let files = (try? FileManager.default.contentsOfDirectory(
-            at: Paths.backupDir, includingPropertiesForKeys: nil))?
-            .filter { $0.pathExtension == "json" && $0.lastPathComponent.hasPrefix("display-") }
-            .sorted { $0.lastPathComponent > $1.lastPathComponent } ?? []
-        return files.prefix(limit).map { url in
-            // display-20260922-164537-286bef5c → "09-22 16:45 · N 台显示器"
-            let name = url.deletingPathExtension().lastPathComponent
-            var label = name
-            let parts = name.split(separator: "-")   // ["display","20260922","164537","286bef5c"]
-            if parts.count == 4, parts[0] == "display",
-               let date = parts[1].count == 8 ? Optional(parts[1]) : nil,
-               let time = parts[2].count == 6 ? Optional(parts[2]) : nil {
-                let count = (try? Backup.decode(try Data(contentsOf: url)))?.displays.count
-                label = "\(date.suffix(4).prefix(2))-\(date.suffix(2)) "
-                    + "\(time.prefix(2)):\(time.dropFirst(2).prefix(2)) · "
-                    + (count.map { "\($0) 台显示器" } ?? "?")
-            }
-            return BackupEntry(url: url, label: label)
-        }
-    }
-
-    // MARK: - 动作执行与错误呈现
+    // MARK: - Action execution and error presentation
 
     private enum Action {
         case enableHiDPI(display: DisplaySnapshot, wanted: ModeInfo)
         case createVirtual(size: (Int, Int))
         case removeVirtual
-        case restore(url: URL)
     }
 
     private func run(_ action: Action) {
@@ -271,22 +242,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             outcome = Result { try state.createVirtual(size: size) }
         case .removeVirtual:
             outcome = Result { try state.removeVirtual() }
-        case .restore(let url):
-            outcome = Result { try state.restore(from: url) }
         }
         if case .failure(let error) = outcome {
-            alert("操作失败", String(describing: error))
+            alert("Operation Failed", String(describing: error))
         }
         if let menu = statusItem.menu { rebuild(menu) }
     }
 
-    // MARK: - 小工具
+    // MARK: - Small helpers
 
     private func titled(_ title: String, keyEquivalent: String = "") -> NSMenuItem {
         NSMenuItem(title: title, action: nil, keyEquivalent: keyEquivalent)
     }
 
-    /// 加一个禁用项（状态/提示行）。
+    /// Adds a disabled row (status / hint lines).
     private func addDisabled(_ menu: NSMenu, _ title: String) {
         let item = titled(title)
         item.isEnabled = false
@@ -329,6 +298,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 extension AppDelegate: NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) {
-        rebuild(menu)   // 每次打开都重建，替代轮询
+        rebuild(menu)   // rebuilt on every open, replacing polling
     }
 }

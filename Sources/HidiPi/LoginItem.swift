@@ -1,4 +1,4 @@
-/// 登录自启：SMAppService.mainApp（macOS 13+ 公开接口）。
+/// Launch at login: SMAppService.mainApp (the public macOS 13+ API).
 import Foundation
 import HidiPiCore
 import ServiceManagement
@@ -16,7 +16,7 @@ enum LoginItem {
                 try SMAppService.mainApp.unregister()
             }
         } catch {
-            throw HiDPIError("设置登录启动失败：\(error.localizedDescription)")
+            throw HiDPIError("Failed to configure launch at login: \(error.localizedDescription)")
         }
     }
 }

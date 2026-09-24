@@ -1,11 +1,12 @@
-/// 移植 virtual.py：CGVirtualDisplay 私有接口的纯 Swift 桥接与生命周期。
+/// Port of virtual.py: a pure-Swift bridge to the CGVirtualDisplay private interface and its lifecycle.
 ///
-/// 本机已实证：CGVirtualDisplay* 类存在于运行时，但未声明我们的协议，
-/// `as!` 下转失败；`unsafeBitCast` 到 @objc 协议存在体（单指针布局）可正常派发
-/// setter/getter。alloc/init 家族改用显式 objc_msgSend + Unmanaged：
-/// alloc 不认领（+1 由 init 吞掉），init 结果 takeRetainedValue 恰好一次——
-/// 与 ObjC ARC 等价。之前 perform(alloc)+perform(init) 双 takeRetainedValue
-/// 造成过度释放，在 GUI 事件循环排 autorelease pool 时崩溃。
+/// Verified on this machine: the CGVirtualDisplay* classes exist at runtime but do not
+/// declare our protocols, so `as!` downcasts fail; `unsafeBitCast` to an @objc protocol
+/// existential (single-pointer layout) dispatches setters/getters correctly. The
+/// alloc/init family uses explicit objc_msgSend + Unmanaged: alloc does not claim (+1 is
+/// swallowed by init), and the init result is takeRetainedValue exactly once — equivalent
+/// to ObjC ARC. The earlier perform(alloc)+perform(init) double takeRetainedValue caused
+/// over-release crashes when the GUI event loop drained its autorelease pool.
 import Foundation
 import HidiPiCore
 import CoreGraphics
@@ -41,8 +42,9 @@ import ObjectiveC
 enum VirtualBridge {
     static let vendorID: UInt32 = 0xF0F0
 
-    // —— 显式 objc_msgSend 桥（所有权与 ObjC ARC 等价，避免 perform/协议 init
-    //     家族的两次 takeRetainedValue 双认领导致过度释放崩溃）——
+    // —— Explicit objc_msgSend bridge (ownership equivalent to ObjC ARC, avoiding the
+    //     double takeRetainedValue of the perform/protocol init family that caused
+    //     over-release crashes) ——
     private typealias AllocFn = @convention(c) (AnyObject, Selector) -> Unmanaged<AnyObject>
     private typealias InitFn = @convention(c) (AnyObject, Selector) -> Unmanaged<AnyObject>
     private typealias InitWithDescriptorFn =
@@ -52,35 +54,35 @@ enum VirtualBridge {
 
     private static func classObject(_ className: String) throws -> AnyObject {
         guard let anyClass: AnyObject = NSClassFromString(className) else {
-            throw HiDPIError("当前 macOS 缺少 \(className)；虚拟屏幕接口不可用。")
+            throw HiDPIError("This macOS lacks \(className); the virtual display interface is unavailable.")
         }
         return anyClass
     }
 
-    /// objc_msgSend 在 Swift 中标记为不可用（变参形式），经 dlsym 取原始地址。
+    /// objc_msgSend is marked unavailable in Swift (variadic form); fetch the raw address via dlsym.
     private static func rawMsgSend() -> UnsafeMutableRawPointer {
         if let symbol = dlsym(dlopen(nil, RTLD_LAZY), "objc_msgSend") { return symbol }
-        fatalError("objc_msgSend 不可用")
+        fatalError("objc_msgSend unavailable")
     }
 
-    /// alloc 不认领（+1 由 init 家族吞掉）；init 结果 takeRetainedValue 认领一次。
+    /// alloc does not claim (+1 is swallowed by the init family); init's result is claimed once.
     private static func alloc(_ className: String) throws -> AnyObject {
         let fn = unsafeBitCast(rawMsgSend(), to: AllocFn.self)
         return fn(try classObject(className), sel_registerName("alloc")).takeUnretainedValue()
     }
 
-    /// 普通对象（descriptor/settings 等）：alloc + init。
-    /// init 必不可少：未 init 的对象内部存储为 nil，setter 会静默失效。
+    /// Plain objects (descriptor/settings etc.): alloc + init.
+    /// init is mandatory: an uninitialized object's storage is nil and setters silently no-op.
     static func instantiate(_ className: String) throws -> NSObject {
         let fn = unsafeBitCast(rawMsgSend(), to: InitFn.self)
         let initialized = fn(try alloc(className), sel_registerName("init"))
         guard let object = initialized.takeRetainedValue() as? NSObject else {
-            throw HiDPIError("无法初始化 \(className)")
+            throw HiDPIError("Cannot initialize \(className)")
         }
         return object
     }
 
-    /// CGVirtualDisplayMode：initWithWidth:height:refreshRate:。
+    /// CGVirtualDisplayMode: initWithWidth:height:refreshRate:.
     static func makeMode(width: UInt32, height: UInt32, refreshRate: Double) throws -> AnyObject {
         let fn = unsafeBitCast(rawMsgSend(), to: InitModeFn.self)
         return fn(try alloc("CGVirtualDisplayMode"),
@@ -88,7 +90,7 @@ enum VirtualBridge {
                   width, height, refreshRate).takeRetainedValue()
     }
 
-    /// CGVirtualDisplay：initWithDescriptor:。
+    /// CGVirtualDisplay: initWithDescriptor:.
     static func makeDisplay(descriptor: AnyObject) throws -> AnyObject {
         let fn = unsafeBitCast(rawMsgSend(), to: InitWithDescriptorFn.self)
         return fn(try alloc("CGVirtualDisplay"),
@@ -97,7 +99,8 @@ enum VirtualBridge {
     }
 }
 
-/// virtual.VirtualDisplay：持有强引用即持有虚拟屏；释放引用即拆除。
+/// virtual.VirtualDisplay: holding the strong reference keeps the virtual display alive;
+/// releasing it tears it down.
 final class VirtualDisplayController {
     private let service: DisplayService
     private var display: AnyObject?
@@ -106,17 +109,17 @@ final class VirtualDisplayController {
     init(service: DisplayService) { self.service = service }
 
     #if arch(arm64)
-    /// virtual.validate_options 的约束。
+    /// The constraints of virtual.validate_options.
     static func validateOptions(size: (Int, Int), refresh: Double) throws {
         guard refresh.isFinite, (24...120).contains(refresh) else {
-            throw HiDPIError("虚拟屏幕刷新率必须在 24–120 Hz 之间。")
+            throw HiDPIError("Virtual display refresh rate must be between 24 and 120 Hz.")
         }
         guard max(size.0, size.1) <= 3840, size.0 * size.1 <= 8_294_400 else {
-            throw HiDPIError("虚拟屏幕逻辑尺寸最大为 3840×2160（或等像素数竖屏）。")
+            throw HiDPIError("Virtual display logical size is capped at 3840×2160 (or equal pixel count in portrait).")
         }
     }
 
-    /// virtual.VirtualDisplay.start：创建 → 应用模式 → 等待上线 → 核验。
+    /// virtual.VirtualDisplay.start: create → apply mode → wait for online → verify.
     func start(size: (Int, Int), refresh: Double) throws -> CGDirectDisplayID {
         let (w, h) = (UInt32(size.0), UInt32(size.1))
 
@@ -140,58 +143,60 @@ final class VirtualDisplayController {
         display = instance
         let proto = unsafeBitCast(instance, to: CGVirtualDisplayProto.self)
         let id = proto.displayID
-        guard id != 0 else { throw HiDPIError("macOS 拒绝创建虚拟屏幕。请在已登录的桌面会话运行。") }
+        guard id != 0 else { throw HiDPIError("macOS refused to create the virtual display. Run in a logged-in desktop session.") }
         displayID = id
-        NSLog("hidipi: 已创建虚拟屏幕对象，ID=%u，等待模式就绪。", id)
+        NSLog("hidipi: virtual display object created, ID=%u, waiting for modes.", id)
 
         let settings = try VirtualBridge.instantiate("CGVirtualDisplaySettings")
         let s = unsafeBitCast(settings, to: CGVirtualDisplaySettingsProto.self)
         s.setHiDPI(1)
-        // HiDPI 开启时，模式尺寸即逻辑点数。
+        // With HiDPI on, the mode size is the logical point count.
         let mode = try VirtualBridge.makeMode(width: w, height: h, refreshRate: refresh)
         s.setModes(NSArray(object: mode))
         guard proto.applySettings(settings) else {
-            throw HiDPIError("macOS 拒绝应用虚拟屏幕模式。")
+            throw HiDPIError("macOS refused to apply the virtual display mode.")
         }
 
-        try service.waitUntil(timeout: 10, "虚拟屏幕未及时上线") {
+        try service.waitUntil(timeout: 10, "The virtual display did not come online in time") {
             try DisplayIO.onlineIDs().contains(id) && DisplayIO.currentMode(id) != nil
         }
         let expected = ModeInfo(width: Int(w), height: Int(h), pixelWidth: Int(w) * 2,
                                 pixelHeight: Int(h) * 2, hz: refresh)
         let actual = DisplayIO.currentMode(id)!
-        NSLog("hidipi: macOS 初始虚拟模式：%@", Modes.describe(actual))
-        // virtual.mode_matches：启动期 hz 可能暂缺，不应因此终止虚拟屏。
+        NSLog("hidipi: initial virtual mode from macOS: %@", Modes.describe(actual))
+        // virtual.mode_matches: hz may be briefly missing during startup; that must not
+        // take down the virtual display.
         if !Modes.modeMatchesLenient(actual, expected) {
             let wanted = try Modes.chooseMode(DisplayIO.allModes(id).map(DisplayIO.info),
                                               size: (Int(w), Int(h)), current: actual, refresh: refresh)
             try service.setMode(id, expected: wanted)
         }
-        try service.waitUntil(timeout: 5, "虚拟屏幕已创建，但 macOS 未提供要求的 HiDPI 模式") {
+        try service.waitUntil(timeout: 5, "Virtual display created, but macOS did not provide the requested HiDPI mode") {
             Modes.modeMatchesLenient(DisplayIO.currentMode(id), expected)
         }
         return id
     }
     #else
     func start(size: (Int, Int), refresh: Double) throws -> CGDirectDisplayID {
-        throw HiDPIError("虚拟屏幕目前支持 Apple Silicon。")
+        throw HiDPIError("Virtual displays are supported on Apple Silicon.")
     }
     #endif
 
-    /// virtual.close：释放引用（dealloc 拆除），等待下线。
+    /// virtual.close: release the reference (dealloc tears it down) and wait for offline.
     func close() {
         display = nil
         guard displayID != 0 else { return }
         let id = displayID
         displayID = 0
-        try? service.waitUntil(timeout: 8, "虚拟屏幕未及时移除；进程退出后将释放") {
+        try? service.waitUntil(timeout: 8, "The virtual display did not go away in time; it will be released when the process exits") {
             try !DisplayIO.onlineIDs().contains(id)
         }
     }
 }
 
 enum VirtualDisplay {
-    /// virtual.capture_original：过滤 macOS 的瞬态兜底桌面（unkn/virt），绝不当作 EDID 硬件回放。
+    /// virtual.capture_original: filter out macOS's transient fallback desktop (unkn/virt);
+    /// never treat it as EDID hardware to replay.
     static func captureOriginal(_ service: DisplayService) throws -> BackupSnapshot {
         let original = try service.snapshot(allowEmpty: true)
         let transient = original.displays.filter {

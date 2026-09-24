@@ -1,6 +1,7 @@
-/// 应用状态与全部操作流程（enable / virtual / restore / quit）。
-/// 遵循 Python 版语义：同一时刻只有一种修改（物理屏或虚拟屏其一，由入口 guard 强制，
-/// 不依赖菜单禁用），退出或移除时按备份恢复。所有方法必须在主线程调用。
+/// App state and all operation flows (enable / virtual / quit).
+/// Follows the Python version's semantics: only one modification at a time (physical OR
+/// virtual, enforced by entry guards rather than menu disabling); restored on quit or
+/// removal from in-memory snapshots. All methods must be called on the main thread.
 import Foundation
 import HidiPiCore
 import CoreGraphics
@@ -9,68 +10,65 @@ final class AppState {
     let service = DisplayService()
     private(set) var lock: OperationLock?
 
-    // —— 物理屏修改状态 ——
-    private(set) var originalSnapshot: BackupSnapshot?   // 首次修改前的完整快照
+    // —— Physical display modification state ——
+    private(set) var originalSnapshot: BackupSnapshot?   // Full snapshot from before the first modification
     private(set) var modifiedDisplayID: CGDirectDisplayID?
     private(set) var modifiedUUID: String?
-    private(set) var backupURL: URL?
 
-    // —— 虚拟屏状态 ——
+    // —— Virtual display state ——
     private(set) var virtualController: VirtualDisplayController?
     private(set) var virtualOriginal: BackupSnapshot?
-    private(set) var virtualBackupURL: URL?
     private(set) var virtualSize: (Int, Int)?
 
     var physicalModified: Bool { originalSnapshot != nil }
     var virtualActive: Bool { virtualController != nil }
 
-    // —— 重入保护 ——
-    // waitUntil 泵 runloop、NSAlert.runModal 都会嵌套事件循环，菜单动作可能在
-    // 操作进行中再次触发；此标志保证"同一时刻只一种修改"不靠菜单禁用维持。
+    // —— Reentrancy guard ——
+    // waitUntil pumps the run loop and NSAlert.runModal nests event loops, so menu actions
+    // can fire while an operation is in flight; this flag keeps "one modification at a time"
+    // from depending on menu disabling.
     private var operationInProgress = false
 
-    /// 修改操作的入口互斥：已在操作中则拒绝重入。
+    /// Entry mutex for mutating operations: rejects reentry while one is in flight.
     private func beginOperation() throws {
         guard !operationInProgress else {
-            throw HiDPIError("上一个操作尚未完成；请稍候再试。")
+            throw HiDPIError("The previous operation is still in progress; try again shortly.")
         }
         operationInProgress = true
     }
 
-    /// 启动时获取与 Python 版互斥的操作锁。
+    /// Acquires at startup the operation lock mutual with the Python version.
     func acquireLock() throws {
         lock = try OperationLock(filename: "operation.lock")
     }
 
-    // MARK: - 物理屏 HiDPI（移植 display.enable_hidpi，去掉预览环节）
+    // MARK: - Physical HiDPI (port of display.enable_hidpi, minus the preview phase)
 
-    /// target 来自刚刷新的快照；wanted 为菜单选择的 HiDPI 模式。
+    /// target comes from a freshly rebuilt snapshot; wanted is the menu-selected HiDPI mode.
     func enableHiDPI(on target: DisplaySnapshot, wanted: ModeInfo) throws {
         guard !virtualActive else {
-            throw HiDPIError("虚拟屏幕运行中；请先移除虚拟屏幕，再修改物理显示器。")
+            throw HiDPIError("A virtual display is active; remove it before changing physical displays.")
         }
         try beginOperation()
         defer { operationInProgress = false }
         guard !target.inMirrorSet else {
-            throw HiDPIError("目标显示器正在镜像。请先在系统设置中解除镜像，再切换 HiDPI。")
+            throw HiDPIError("The target display is mirroring. Disable mirroring in System Settings first.")
         }
         guard let current = target.mode else {
-            throw HiDPIError("无法读取原始模式，不能安全备份；取消操作。")
+            throw HiDPIError("Cannot read the original mode, so no safe rollback is possible; cancelled.")
         }
-        if Modes.modeMatches(current, wanted) { return }   // 已处于该模式
+        if Modes.modeMatches(current, wanted) { return }   // already in that mode
         let original = try service.snapshot()
-        // 备份并回读核验 —— 任何显示器改动之前完成。
-        let backup = try Backup.write(original, to: Paths.backupDir)
-        NSLog("hidipi: 已备份并回读核验：%@", backup.path)
+        // The snapshot is the rollback reference — validate it before touching any display.
+        try Backup.validate(original)
         if originalSnapshot == nil {
             originalSnapshot = original
-            backupURL = backup
         }
         modifiedDisplayID = target.id
         modifiedUUID = target.uuid
         do {
             try service.setMode(target.id, expected: wanted)
-            try service.waitUntil(timeout: 5, "系统未切换到指定 HiDPI 模式，正在恢复") {
+            try service.waitUntil(timeout: 5, "The system did not switch to the requested HiDPI mode; rolling back") {
                 Modes.modeMatches(DisplayIO.currentMode(target.id), wanted)
             }
         } catch {
@@ -79,27 +77,25 @@ final class AppState {
         }
     }
 
-    // MARK: - 虚拟屏（移植 virtual.run）
+    // MARK: - Virtual display (port of virtual.run)
 
     func createVirtual(size: (Int, Int)) throws {
         guard !physicalModified else {
-            throw HiDPIError("物理显示器修改尚未恢复；请先退出物理屏修改，再创建虚拟屏幕。")
+            throw HiDPIError("Physical display changes are not restored yet; exit that change before creating a virtual display.")
         }
         try beginOperation()
         defer { operationInProgress = false }
         try VirtualDisplayController.validateOptions(size: size, refresh: 60)
         let original = try VirtualDisplay.captureOriginal(service)
-        let backup = try Backup.write(original, to: Paths.backupDir)
-        NSLog("hidipi: 创建虚拟屏幕前已备份：%@", backup.path)
+        try Backup.validate(original)
         let controller = VirtualDisplayController(service: service)
         do {
             let id = try controller.start(size: size, refresh: 60)
-            NSLog("hidipi: 虚拟屏幕已核验，ID=%u", id)
+            NSLog("hidipi: virtual display verified, ID=%u", id)
             virtualController = controller
             virtualOriginal = original
-            virtualBackupURL = backup
             virtualSize = size
-            // 记住期望状态：重启 / 登录自启动后自动重建。
+            // Remember the desired state: rebuilt automatically after restart / login launch.
             try VirtualPreference.save(size)
         } catch {
             controller.close()
@@ -108,8 +104,8 @@ final class AppState {
         }
     }
 
-    /// clearPreference：用户显式移除时为 true（清除期望状态）；
-    /// 意外消失的清理路径为 false（保住记录，下次登录仍会重建）。
+    /// clearPreference: true when the user explicitly removes (clears the desired state);
+    /// false on unexpected-disappearance cleanup (keeps the record so the next login rebuilds).
     func removeVirtual(clearPreference: Bool = true) throws {
         guard let controller = virtualController else { return }
         try beginOperation()
@@ -118,48 +114,33 @@ final class AppState {
         controller.close()
         let original = virtualOriginal
         virtualOriginal = nil
-        virtualBackupURL = nil
         virtualSize = nil
         if clearPreference { VirtualPreference.clear() }
         if let original {
-            try service.restoreConnected(original)   // 失败上抛：备份仍在磁盘
+            try service.restoreConnected(original)   // failure propagates
         }
     }
 
-    /// 登录自启动后按偏好重建虚拟屏；无记录或已存在时静默跳过。
-    /// 返回 nil 表示无需/已重建，非 nil 为失败错误（调用方提示后可手动重试）。
+    /// Rebuilds the virtual display from the recorded preference after login launch;
+    /// silently skipped when no record exists or one is already running.
+    /// Returns nil when nothing to do / rebuilt; non-nil on failure (caller may offer retry).
     @discardableResult
     func restorePreferredVirtual() -> Error? {
         guard virtualController == nil, let size = VirtualPreference.load() else { return nil }
-        NSLog("hidipi: 检测到虚拟屏偏好记录，自动重建 %@。", "\(size.0)×\(size.1)")
+        NSLog("hidipi: virtual display preference found, rebuilding %@.", "\(size.0)×\(size.1)")
         do {
             try createVirtual(size: size)
             return nil
         } catch {
-            NSLog("hidipi: 自动重建失败：%@", String(describing: error))
+            NSLog("hidipi: automatic rebuild failed: %@", String(describing: error))
             return error
         }
     }
 
-    // MARK: - 从备份恢复（移植 cli 的 restore 分支）
+    // MARK: - Quit-time cleanup (the Python version's finally-restore)
 
-    func restore(from url: URL) throws {
-        try beginOperation()
-        defer { operationInProgress = false }
-        let saved = try Backup.decode(try Data(contentsOf: url))
-        let currentBackup = try Backup.write(try service.snapshot(), to: Paths.backupDir)
-        NSLog("hidipi: 恢复前的状态也已备份：%@", currentBackup.path)
-        try service.restore(saved)
-        // 恢复成功后，本应用不再持有"已修改"状态。
-        originalSnapshot = nil
-        modifiedDisplayID = nil
-        modifiedUUID = nil
-        backupURL = nil
-    }
-
-    // MARK: - 退出清理（对应 Python 的 finally 恢复）
-
-    /// 尽力恢复且不抛错（用于回调里的安全兜底）。
+    /// Best-effort restore for callback safety nets; if restore throws, state is
+    /// intentionally kept so quit retries it.
     func restoreOriginalQuietly() throws {
         if let original = originalSnapshot {
             try service.restoreConnected(original)
@@ -167,10 +148,10 @@ final class AppState {
         originalSnapshot = nil
         modifiedDisplayID = nil
         modifiedUUID = nil
-        backupURL = nil
     }
 
-    /// 退出前的完整清理；失败时调用方决定是否仍退出（磁盘备份仍在）。
+    /// Full cleanup before quitting; on failure the caller decides whether to quit anyway
+    /// (physical mode changes still auto-revert on process exit via the app-only scope).
     func teardown() throws {
         if let controller = virtualController {
             virtualController = nil
@@ -179,7 +160,6 @@ final class AppState {
                 try service.restoreConnected(original)
             }
             virtualOriginal = nil
-            virtualBackupURL = nil
             virtualSize = nil
         }
         if let original = originalSnapshot {
@@ -187,19 +167,19 @@ final class AppState {
             originalSnapshot = nil
             modifiedDisplayID = nil
             modifiedUUID = nil
-            backupURL = nil
         }
         lock = nil
     }
 
-    // MARK: - 菜单数据
+    // MARK: - Menu data
 
     struct ModeOption {
         let mode: ModeInfo
-        var label: String { "\(mode.width)×\(mode.height)（\(Modes.formatG(mode.hz)) Hz）" }
+        var label: String { "\(mode.width)×\(mode.height) (\(Modes.formatG(mode.hz)) Hz)" }
     }
 
-    /// list_displays 的菜单版：模式枚举走 CG，去重/排序纯逻辑在 Modes.hidpiChoices。
+    /// The menu version of list_displays: mode enumeration goes through CG; the
+    /// dedup/sorting pure logic lives in Modes.hidpiChoices.
     static func hidpiOptions(for display: DisplaySnapshot) -> [ModeOption] {
         guard let current = display.mode else { return [] }
         return Modes.hidpiChoices(DisplayIO.allModes(display.id).map(DisplayIO.info), current: current)

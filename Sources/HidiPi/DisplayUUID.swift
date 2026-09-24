@@ -1,5 +1,6 @@
-/// CGDisplayCreateUUIDFromDisplayID 的 dlsym shim。
-/// macOS 27 起该符号不再由 CoreGraphics 导出，需回退 SkyLight（与 macos.py 相同路径）。
+/// dlsym shim for CGDisplayCreateUUIDFromDisplayID.
+/// Since macOS 27 the symbol is no longer exported by CoreGraphics; fall back to SkyLight
+/// (the same path as macos.py).
 import Foundation
 import HidiPiCore
 import CoreGraphics
@@ -20,11 +21,11 @@ enum DisplayUUID {
         return nil
     }()
 
-    /// macos.identity：CFUUIDCreateString 的大写规范形式，跨重启稳定。
+    /// macos.identity: CFUUIDCreateString's canonical uppercase form, stable across reboots.
     static func string(for display: CGDirectDisplayID) throws -> String {
         guard let fn, let uuid = fn(display),
               let string = CFUUIDCreateString(kCFAllocatorDefault, uuid) as String? else {
-            throw HiDPIError("无法取得显示器 \(display) 的 UUID；不能可靠备份。")
+            throw HiDPIError("Cannot obtain a UUID for display \(display); no reliable snapshot is possible.")
         }
         return string
     }

@@ -1,26 +1,26 @@
-/// CoreGraphics 基础访问：移植 macos.py 的 ids/info/modes/check。
+/// CoreGraphics basics: port of macos.py's ids/info/modes/check.
 import Foundation
 import HidiPiCore
 import CoreGraphics
 import AppKit
 
 enum DisplayIO {
-    /// macos.check：CGError → 中文错误。
+    /// macos.check: CGError → human-readable error.
     static func check(_ code: CGError, _ operation: String) throws {
         if code != .success {
-            throw HiDPIError("\(operation) 失败，CoreGraphics 错误码 \(code.rawValue)")
+            throw HiDPIError("\(operation) failed, CoreGraphics error \(code.rawValue)")
         }
     }
 
-    /// CGGetOnlineDisplayList（上限 128，同 Python）。
+    /// CGGetOnlineDisplayList (capped at 128, like Python).
     static func onlineIDs() throws -> [CGDirectDisplayID] {
         var ids = [CGDirectDisplayID](repeating: 0, count: 128)
         var count: UInt32 = 0
-        try check(CGGetOnlineDisplayList(128, &ids, &count), "读取显示器")
+        try check(CGGetOnlineDisplayList(128, &ids, &count), "Reading displays")
         return Array(ids.prefix(Int(count)))
     }
 
-    /// macos.info：CGDisplayMode → ModeInfo（Swift 导入为属性访问）。
+    /// macos.info: CGDisplayMode → ModeInfo (imported into Swift as property access).
     static func info(_ mode: CGDisplayMode) -> ModeInfo {
         ModeInfo(width: mode.width, height: mode.height,
                  pixelWidth: mode.pixelWidth, pixelHeight: mode.pixelHeight,
@@ -30,19 +30,19 @@ enum DisplayIO {
                  usable: mode.isUsableForDesktopGUI())
     }
 
-    /// 当前模式。macos.current 的完整移植：虚拟屏（0xF0F0）在 CG 无模式时
-    /// 回退 NSScreen（启动期 CG 可能只发布 NSScreen 数据；hz 未知记 0，
-    /// Modes.modeMatchesLenient 对 hz=0 容差正是为此）。
-    /// CGDisplayCopy* 遵循 +1 约定，由 ARC 释放。
+    /// The current mode. A full port of macos.current: for virtual displays (0xF0F0) with no
+    /// CG mode, fall back to NSScreen (during startup CG may only publish NSScreen data;
+    /// hz is unknown and recorded as 0 — Modes.modeMatchesLenient's tolerance for hz=0
+    /// exists exactly for this). CGDisplayCopy* follows the +1 convention; ARC releases.
     static func currentMode(_ display: CGDirectDisplayID) -> ModeInfo? {
         if let mode = CGDisplayCopyDisplayMode(display) { return info(mode) }
         guard CGDisplayVendorNumber(display) == VirtualBridge.vendorID else { return nil }
         return screenMode(display)
     }
 
-    /// macos.screen_mode：从 NSScreen 的 deviceDescription 读回退模式。
+    /// macos.screen_mode: read the fallback mode from NSScreen's deviceDescription.
     private static func screenMode(_ display: CGDirectDisplayID) -> ModeInfo? {
-        for screen in NSScreen.screens ?? [] {
+        for screen in NSScreen.screens {
             guard let number = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value,
                   number == display else { continue }
             let scale = screen.backingScaleFactor
@@ -57,8 +57,8 @@ enum DisplayIO {
         return nil
     }
 
-    /// macos.modes：带 kCGDisplayShowDuplicateLowResolutionModes 的完整模式列表。
-    /// CFArray → [CGDisplayMode] 桥接会逐个保留引用。
+    /// macos.modes: the full mode list including kCGDisplayShowDuplicateLowResolutionModes.
+    /// CFArray → [CGDisplayMode] bridging retains each reference.
     static func allModes(_ display: CGDirectDisplayID) -> [CGDisplayMode] {
         let options = [kCGDisplayShowDuplicateLowResolutionModes: kCFBooleanTrue] as CFDictionary
         guard let array = CGDisplayCopyAllDisplayModes(display, options) else { return [] }

@@ -17,8 +17,7 @@ let package = Package(
         ),
         .testTarget(
             name: "HidiPiCoreTests",
-            dependencies: ["HidiPiCore"],
-            resources: [.copy("Fixtures/python-backup.json")]
+            dependencies: ["HidiPiCore"]
         ),
     ]
 )

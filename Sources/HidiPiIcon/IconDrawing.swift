@@ -1,12 +1,13 @@
-/// 状态栏图标：显示器轮廓 + 2×2 像素阵列，表达 HiDPI 双倍像素渲染。
-/// 几何坐标与 hidipi/scripts/render-status-icon.swift / StatusIconTemplate.svg 逐字一致，
-/// 在翻转的 18×18 坐标系中绘制。状态栏图标与 App icns 共用此唯一来源。
+/// Status-bar icon: a display outline plus a 2×2 pixel array, expressing HiDPI's doubled
+/// pixel rendering. Geometry matches hidipi/scripts/render-status-icon.swift /
+/// StatusIconTemplate.svg exactly, drawn in a flipped 18×18 coordinate system. The single
+/// source shared by the status-bar icon and the app icns.
 import AppKit
 
 public enum IconDrawing {
     public static let points: CGFloat = 18
 
-    /// 在当前 NSGraphicsContext 中按 18×18 逻辑坐标绘制模板图形（黑色）。
+    /// Draws the template shape (black) in 18×18 logical coordinates in the current NSGraphicsContext.
     public static func draw() {
         NSColor.black.setStroke()
         NSColor.black.setFill()
@@ -30,7 +31,7 @@ public enum IconDrawing {
         }
     }
 
-    /// 以指定像素尺寸渲染 PNG（scale = size / 18）。
+    /// Renders a PNG at the given pixel size (scale = size / 18).
     public static func pngData(width: Int, height: Int) -> Data? {
         guard let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height,
                                             bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true,
@@ -49,7 +50,7 @@ public enum IconDrawing {
         return bitmap.representation(using: .png, properties: [:])
     }
 
-    /// 状态栏用 NSImage：18 pt 逻辑尺寸，1x/2x/3x 表示，模板着色。
+    /// NSImage for the status bar: 18 pt logical size, 1x/2x/3x representations, template coloring.
     public static func statusItemIcon() -> NSImage {
         let image = NSImage(size: NSSize(width: points, height: points))
         for scale in [1, 2, 3] {

@@ -1,4 +1,4 @@
-/// HidiPi 菜单栏 App 入口：accessory 策略（无 Dock 图标，与 LSUIElement 双保险）。
+/// HidiPi menu-bar app entry point: accessory policy (no Dock icon, doubled up with LSUIElement).
 import AppKit
 
 let app = NSApplication.shared

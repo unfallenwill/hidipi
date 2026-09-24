@@ -1,0 +1,46 @@
+# 推送 v<版本> 标签触发：测试 → 打包 DMG → 构建溯源 → 发布 GitHub Release。
+# DMG 版本取自标签（v0.3.2 → HidiPi-0.3.2.dmg），经 HIDIPI_VERSION 传入打包脚本。
+# 下载方可验证来源：gh attestation verify HidiPi-<版本>.dmg -R <本仓库>
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write   # gh release 创建 Release 与上传资产
+  id-token: write   # attest-build-provenance 的 Sigstore keyless 签名
+
+jobs:
+  dmg:
+    # macos-latest = macOS 26 arm64；虚拟屏代码以 arch(arm64) 门控（Apple Silicon only）
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
+
+      - name: 校验标签格式
+        run: |
+          [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] \
+            || { echo "标签须形如 v0.3.2：$GITHUB_REF_NAME"; exit 1; }
+
+      - name: 单元测试
+        run: swift test
+
+      - name: 打包 DMG
+        run: HIDIPI_VERSION="${GITHUB_REF_NAME#v}" scripts/build-app.sh
+
+      # SLSA 构建溯源：按内容摘要记录"这份 DMG 出自本仓库这次构建"，可离线核验
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4
+        with:
+          subject-path: dist/*.dmg
+
+      - name: 发布 Release 并上传 DMG
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="$GITHUB_REF_NAME"
+          # 重跑时 Release 已存在则改为覆盖上传资产
+          gh release create "$TAG" dist/*.dmg \
+            --title "HidiPi ${TAG#v}" \
+            --generate-notes \
+          || gh release upload "$TAG" dist/*.dmg --clobber

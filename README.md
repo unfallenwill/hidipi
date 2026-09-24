@@ -49,6 +49,9 @@ swift build            # 构建
 swift test             # 单元测试（纯逻辑 + 与 Python 备份互通）
 ```
 
+发布：推送 `v<版本>` 标签（如 `v0.3.2`）触发 GitHub Actions——测试、打包 DMG（版本取自标签）、
+生成 SLSA 构建溯源，并发布到 GitHub Release；下载方可 `gh attestation verify` 验证 DMG 来源。
+
 结构：`Sources/HidiPiCore`（纯逻辑：模式选择 / 备份校验）、`Sources/HidiPi`（App：
 CG 事务、虚拟屏桥接、菜单栏 UI）、`Sources/HidiPiIcon`（图标几何，状态栏与 icns 共用）、
 `Sources/render-icon`（icns 素材生成）、`scripts/build-app.sh`（打包）。

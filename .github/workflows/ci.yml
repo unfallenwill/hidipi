@@ -1,0 +1,25 @@
+# CI: unit tests plus the real-display integration suite, with a coverage report.
+# macOS runners have a logged-in desktop session (WindowServer), so the
+# HIDIPI_INTEGRATION-gated tests can execute genuine CG transactions safely on a
+# disposable machine.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: macos-latest
+    env:
+      HIDIPI_INTEGRATION: "1"
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
+
+      - name: Unit and integration tests, with coverage
+        run: scripts/coverage.sh
+
+      - name: Build the release app
+        run: swift build -c release

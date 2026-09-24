@@ -27,5 +27,11 @@ let package = Package(
             name: "HidiPiTests",
             dependencies: ["HidiPi"]
         ),
+        // Real CG transactions against live displays — only safe on disposable machines
+        // (CI runners); gated by HIDIPI_INTEGRATION=1, local `swift test` skips them.
+        .testTarget(
+            name: "HidiPiIntegrationTests",
+            dependencies: ["HidiPi"]
+        ),
     ]
 )

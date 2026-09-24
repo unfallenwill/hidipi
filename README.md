@@ -19,9 +19,21 @@ scripts/build-app.sh        # produces dist/HidiPi-<version>.dmg
 
 Open the DMG and drag HidiPi.app into Applications. You can also run `build/HidiPi.app` directly.
 
-When distributing the DMG, recipients may hit a quarantine prompt on first launch; running
-`xattr -dr com.apple.quarantine /Applications/HidiPi.app` clears it (self-built copies
-usually don't have this problem).
+### Gatekeeper warning
+
+The app is ad-hoc signed and not notarized, so on first launch Gatekeeper blocks it
+("Apple cannot verify…"). Any of these unblocks it:
+
+- **System Settings**: after seeing the block dialog, open System Settings → Privacy &
+  Security, scroll down, and click **Open Anyway**.
+- **Terminal**: `xattr -dr com.apple.quarantine /Applications/HidiPi.app`
+- **Download via terminal** in the first place — `curl -LO <dmg url>` or
+  `gh release download <tag> -R unfallenwill/hidipi` do not attach the quarantine
+  attribute, so no prompt appears at all.
+
+(Right-click → Open no longer bypasses this on current macOS.) Real notarization requires
+an Apple Developer Program membership and a Developer ID certificate; without one the
+build falls back to ad-hoc signing.
 
 ## Usage
 

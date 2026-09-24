@@ -1,11 +1,16 @@
-// Integration tests execute real CoreGraphics transactions (mode switches, virtual
-// display creation) against the live desktop of whatever machine runs them. They are
-// only safe on disposable machines such as CI macOS runners, and are therefore gated
-// behind HIDIPI_INTEGRATION=1: a plain local `swift test` skips every test here.
+// Integration tests execute real CoreGraphics transactions (mode switches against the
+// live desktop) on disposable machines such as CI macOS runners. They are gated behind
+// HIDIPI_INTEGRATION=1: a plain local `swift test` skips every test here.
 //
 // The flows under test restore their own state: mode switches use the app-only scope
-// and are followed by an explicit restore; virtual displays are closed before exit.
-import AppKit
+// and are followed by an explicit restore.
+//
+// Deliberately NOT covered here: the full virtual display lifecycle. CGVirtualDisplay
+// creation cannot run in test processes — locally (a real desktop) the private-class
+// instantiation segfaults inside the test runner, and on CI runners the object is
+// created but the display never comes online (the VM's display pipeline is itself
+// software). Virtual display creation stays covered by the object-level bridge test in
+// HidiPiTests and by real usage of the app.
 import CoreGraphics
 import Foundation
 import Testing
@@ -15,7 +20,7 @@ import HidiPiCore
 private let integrationEnabled = ProcessInfo.processInfo.environment["HIDIPI_INTEGRATION"] == "1"
 
 /// Serialized because CG configuration transactions must not overlap: parallel tests
-/// racing setMode/virtual-display creation segfault inside CoreGraphics.
+/// racing setMode segfault inside CoreGraphics.
 @Suite(.enabled(if: integrationEnabled), .serialized)
 struct IntegrationTests {
     @Test func snapshotCapturesTheLiveDesktop() throws {
@@ -55,28 +60,6 @@ struct IntegrationTests {
         }
         try service.restore(original)
         #expect(Modes.modeMatches(DisplayIO.currentMode(display.id), current))
-    }
-
-    /// The full virtual display lifecycle: objc bridge → start (apply mode, wait for
-    /// online, verify HiDPI) → close (teardown, wait for offline). The CGVirtualDisplay
-    /// bridge needs a GUI process running the work on its main thread — exactly the
-    /// context the app provides via NSApplication.run — so the test replicates it:
-    /// bootstrap NSApplication and hop to the main thread.
-    @Test func virtualDisplayLifecycle() throws {
-        let service = DisplayService()
-        var online = false
-        try DispatchQueue.main.sync {
-            // NSApplication must only be touched on the main thread.
-            NSApplication.shared.setActivationPolicy(.accessory)
-            let controller = VirtualDisplayController(service: service)
-            let id = try controller.start(size: (1920, 1080), refresh: 60)
-            online = DisplayIO.isOnline(id)
-            let expected = ModeInfo(width: 1920, height: 1080, pixelWidth: 3840,
-                                    pixelHeight: 2160, hz: 60)
-            #expect(Modes.modeMatchesLenient(DisplayIO.currentMode(id), expected))
-            controller.close()
-        }
-        #expect(online)
     }
 
     /// enableHiDPI with the current mode takes the already-there early return, and

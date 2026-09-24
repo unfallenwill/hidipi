@@ -7,7 +7,7 @@ import HidiPiCore
 import CoreGraphics
 
 final class AppState {
-    let service = DisplayService()
+    let service: DisplayService
     private(set) var lock: OperationLock?
 
     // —— Physical display modification state ——
@@ -34,6 +34,22 @@ final class AppState {
             throw HiDPIError("The previous operation is still in progress; try again shortly.")
         }
         operationInProgress = true
+    }
+
+    /// Test seam: fixture states for guard and cleanup paths; production always starts
+    /// clean (AppDelegate uses the default).
+    init(service: DisplayService = DisplayService(),
+         originalSnapshot: DisplayState? = nil,
+         modifiedDisplayID: UInt32? = nil,
+         virtualController: VirtualDisplayController? = nil,
+         virtualOriginal: DisplayState? = nil,
+         virtualSize: (Int, Int)? = nil) {
+        self.service = service
+        self.originalSnapshot = originalSnapshot
+        self.modifiedDisplayID = modifiedDisplayID
+        self.virtualController = virtualController
+        self.virtualOriginal = virtualOriginal
+        self.virtualSize = virtualSize
     }
 
     /// Acquires at startup the operation lock mutual with the Python version.

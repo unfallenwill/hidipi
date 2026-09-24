@@ -13,9 +13,41 @@ final class MenuItemAction: NSObject {
     @objc func invoke() { handler() }
 }
 
+/// Dialog presentation, injectable for tests; the defaults show real AppKit UI.
+struct DialogPresenter {
+    var alert: (_ title: String, _ message: String) -> Void = { title, message in
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.alertStyle = .warning
+        alert.runModal()
+    }
+    var confirm: (_ title: String, _ message: String,
+                  _ confirmButton: String, _ cancelButton: String) -> Bool =
+    { title, message, confirmButton, cancelButton in
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.addButton(withTitle: confirmButton)
+        alert.addButton(withTitle: cancelButton)
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+    var about: () -> Void = {
+        NSApp.activate(ignoringOtherApps: true)
+        // Name and version come from the bundle's Info.plist; only the credits are custom.
+        NSApp.orderFrontStandardAboutPanel(options: [.credits: NSAttributedString(
+            string: "Menu-bar HiDPI control for physical and virtual displays.\n"
+                + "https://github.com/unfallenwill/hidipi",
+            attributes: [.font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)])])
+    }
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private var statusItem: NSStatusItem!
+    private var statusItem: NSStatusItem?
     let state: AppState
+    var dialogs = DialogPresenter()   // replaced by tests
     private var actions: [MenuItemAction] = []   // kept alive while the menu exists
     private var reconfigurationCallback: CGDisplayReconfigurationCallBack?
 
@@ -30,10 +62,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             try state.teardown()
             return .terminateNow
         } catch {
-            let choice = confirm("Restore incomplete on quit",
+            let choice = dialogs.confirm("Restore incomplete on quit",
                 "Restore did not fully complete: \(error)\n\nPhysical mode changes still revert "
-                + "automatically once the app exits. Quit anyway?",
-                confirmButton: "Quit", cancelButton: "Cancel")
+                + "automatically once the app exits. Quit anyway?", "Quit", "Cancel")
             return choice ? .terminateNow : .terminateCancel
         }
     }
@@ -57,17 +88,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             try state.acquireLock()
         } catch {
             NSLog("hidipi: startup failed: %@", String(describing: error))
-            alert("Cannot Start", String(describing: error))
+            dialogs.alert("Cannot Start", String(describing: error))
             NSApp.terminate(nil)
             return
         }
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.button?.image = IconDrawing.statusItemIcon()
-        statusItem.button?.toolTip = "hidipi"
-        statusItem.button?.setAccessibilityLabel("hidipi")
+        statusItem?.button?.image = IconDrawing.statusItemIcon()
+        statusItem?.button?.toolTip = "hidipi"
+        statusItem?.button?.setAccessibilityLabel("hidipi")
         let menu = NSMenu()
         menu.delegate = self
-        statusItem.menu = menu
+        statusItem?.menu = menu
         registerReconfigurationCallback()
         // The menu renders on first open (menuWillOpen); no upfront build needed.
         // Login-autostart path: rebuild the virtual display from the recorded preference
@@ -75,11 +106,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             do {
-                if try self.state.restorePreferredVirtual(), let menu = self.statusItem.menu {
+                if try self.state.restorePreferredVirtual(), let menu = self.statusItem?.menu {
                     self.rebuild(menu)
                 }
             } catch {
-                self.alert("Virtual Display Auto-Rebuild Failed",
+                self.dialogs.alert("Virtual Display Auto-Rebuild Failed",
                     "\(error)\n\nYou can retry from the menu. The preference record is kept at "
                     + "\(VirtualPreference.url.path).")
             }
@@ -91,7 +122,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// is ever pending on the main queue.
     private var stateSyncPending = false
 
-    private func onDisplayReconfiguration() {
+    func onDisplayReconfiguration() {
         guard !stateSyncPending else { return }
         stateSyncPending = true
         DispatchQueue.main.async { [weak self] in
@@ -118,7 +149,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                           String(describing: error))
                 }
             }
-            if let menu = self.statusItem.menu { self.rebuild(menu) }
+            if let menu = self.statusItem?.menu { self.rebuild(menu) }
         }
     }
 
@@ -191,40 +222,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             do {
                 try LoginItem.setEnabled(!LoginItem.isEnabled)
             } catch {
-                self.alert("Login Item", String(describing: error))
+                self.dialogs.alert("Login Item", String(describing: error))
             }
             // No rebuild needed: the menu re-renders on next open (menuWillOpen).
         }
         menu.addItem(login)
         menu.addItem(.separator())
         menu.addItem(titled("About HidiPi") { [weak self] in
-            self?.showAbout()
+            self?.dialogs.about()
         })
         menu.addItem(titled("Quit (Restore Original Settings)", keyEquivalent: "q") {
             NSApp.terminate(nil)
         })
     }
 
-    // MARK: - About panel
-
-    private func showAbout() {
-        NSApp.activate(ignoringOtherApps: true)
-        // Name and version come from the bundle's Info.plist; only the credits are custom.
-        NSApp.orderFrontStandardAboutPanel(options: [.credits: NSAttributedString(
-            string: "Menu-bar HiDPI control for physical and virtual displays.\n"
-                + "https://github.com/unfallenwill/hidipi",
-            attributes: [.font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)])])
-    }
-
     // MARK: - Action execution and error presentation
 
-    private enum Action {
+    enum Action {
         case enableHiDPI(display: DisplaySnapshot, wanted: ModeInfo)
         case createVirtual(size: (Int, Int))
         case removeVirtual
     }
 
-    private func run(_ action: Action) {
+    func run(_ action: Action) {
         let outcome: Result<Void, Error>
         switch action {
         case .enableHiDPI(let display, let wanted):
@@ -235,7 +255,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             outcome = Result { try state.removeVirtual() }
         }
         if case .failure(let error) = outcome {
-            alert("Operation Failed", String(describing: error))
+            dialogs.alert("Operation Failed", String(describing: error))
         }
         // No rebuild needed: invoking an item dismisses the menu, and the next open
         // re-renders via menuWillOpen.
@@ -265,26 +285,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         item.target = action
         item.action = #selector(MenuItemAction.invoke)
         actions.append(action)
-    }
-
-    private func alert(_ title: String, _ message: String) {
-        NSApp.activate(ignoringOtherApps: true)
-        let alert = NSAlert()
-        alert.messageText = title
-        alert.informativeText = message
-        alert.alertStyle = .warning
-        alert.runModal()
-    }
-
-    private func confirm(_ title: String, _ message: String,
-                         confirmButton: String, cancelButton: String) -> Bool {
-        NSApp.activate(ignoringOtherApps: true)
-        let alert = NSAlert()
-        alert.messageText = title
-        alert.informativeText = message
-        alert.addButton(withTitle: confirmButton)
-        alert.addButton(withTitle: cancelButton)
-        return alert.runModal() == .alertFirstButtonReturn
     }
 }
 

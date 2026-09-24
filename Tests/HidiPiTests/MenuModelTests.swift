@@ -87,6 +87,13 @@ private func build(_ state: MenuState,
     #expect(model.displaySections[0].hint == "No HiDPI modes available")
 }
 
+@Test func modifiedDisplayStatusDescribesItsLiveMode() {
+    guard CGMainDisplayID() != 0 else { return }
+    let model = build(MenuState(modifiedDisplayID: CGMainDisplayID()))
+    #expect(model.statusText != "No display changes active")
+    #expect(model.statusText.contains("rendered"))
+}
+
 // MARK: - Rendering (NSMenu construction happens on the main thread, like the app)
 
 @Test func renderProducesACompleteIdleMenu() throws {

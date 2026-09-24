@@ -11,6 +11,7 @@
 // created but the display never comes online (the VM's display pipeline is itself
 // software). Virtual display creation stays covered by the object-level bridge test in
 // HidiPiTests and by real usage of the app.
+import AppKit
 import CoreGraphics
 import Foundation
 import Testing
@@ -104,5 +105,24 @@ struct IntegrationTests {
         try state.teardown()
         #expect(!state.virtualActive)
         try state.teardown()   // idempotent
+    }
+
+    /// Without a preference record nothing is rebuilt at login.
+    @Test func restorePreferredVirtualWithoutRecordReturnsFalse() throws {
+        #expect(try AppState().restorePreferredVirtual() == false)
+    }
+
+    /// The launch sequence end to end: lock acquisition, status item, callback
+    /// registration. Safe on CI, where no other instance holds the lock.
+    @Test func launchSequenceInitializesTheStatusBar() throws {
+        DispatchQueue.main.sync {
+            NSApplication.shared.setActivationPolicy(.accessory)
+            let delegate = AppDelegate(state: AppState())
+            delegate.applicationDidFinishLaunching(Notification(name: Notification.Name("test")))
+        }
+        // Let the deferred preference check run on the main queue.
+        let done = DispatchSemaphore(value: 0)
+        DispatchQueue.main.async { done.signal() }
+        _ = done.wait(timeout: .now() + 2)
     }
 }

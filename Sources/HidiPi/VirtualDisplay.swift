@@ -158,7 +158,7 @@ final class VirtualDisplayController {
         }
 
         try service.waitUntil(timeout: 10, "The virtual display did not come online in time") {
-            try DisplayIO.onlineIDs().contains(id) && DisplayIO.currentMode(id) != nil
+            DisplayIO.isOnline(id) && DisplayIO.currentMode(id) != nil
         }
         let expected = ModeInfo(width: Int(w), height: Int(h), pixelWidth: Int(w) * 2,
                                 pixelHeight: Int(h) * 2, hz: refresh)
@@ -189,26 +189,18 @@ final class VirtualDisplayController {
         let id = displayID
         displayID = 0
         try? service.waitUntil(timeout: 8, "The virtual display did not go away in time; it will be released when the process exits") {
-            try !DisplayIO.onlineIDs().contains(id)
+            !DisplayIO.isOnline(id)
         }
     }
 }
 
 enum VirtualDisplay {
     /// virtual.capture_original: filter out macOS's transient fallback desktop (unkn/virt);
-    /// never treat it as EDID hardware to replay.
-    static func captureOriginal(_ service: DisplayService) throws -> BackupSnapshot {
-        let original = try service.snapshot(allowEmpty: true)
-        let transient = original.displays.filter {
-            $0.vendor == 0x756E6B6E && $0.model == 0x76697274
+    /// never treat it as EDID hardware to replay. An empty result is the headless case.
+    static func captureOriginal(_ service: DisplayService) throws -> DisplayState {
+        let stable = try service.snapshot(allowEmpty: true).displays.filter {
+            !($0.vendor == 0x756E6B6E && $0.model == 0x76697274)
         }
-        let stable = original.displays.filter { !transient.contains($0) }
-        if stable.isEmpty {
-            return BackupSnapshot(headlessCreated: original.created, macos: original.macos,
-                                  systemFallback: transient)
-        }
-        var partial = original
-        partial.displays = stable
-        return partial
+        return DisplayState(displays: stable)
     }
 }

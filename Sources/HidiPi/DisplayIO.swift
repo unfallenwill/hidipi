@@ -26,8 +26,12 @@ enum DisplayIO {
                  pixelWidth: mode.pixelWidth, pixelHeight: mode.pixelHeight,
                  hz: mode.refreshRate,
                  modeID: UInt32(bitPattern: mode.ioDisplayModeID),
-                 flags: mode.ioFlags,
                  usable: mode.isUsableForDesktopGUI())
+    }
+
+    /// Online membership; a failed list read counts as offline.
+    static func isOnline(_ display: CGDirectDisplayID) -> Bool {
+        (try? onlineIDs())?.contains(display) ?? false
     }
 
     /// The current mode. A full port of macos.current: for virtual displays (0xF0F0) with no

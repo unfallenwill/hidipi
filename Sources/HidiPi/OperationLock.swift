@@ -14,11 +14,10 @@ final class OperationLock {
     private let fd: Int32
 
     /// A thrown error means the lock is held (another HiDPI operation is running).
-    init(filename: String) throws {
-        let directory = Paths.configDir
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
+    init() throws {
+        let path = Paths.operationLock
+        try FileManager.default.createDirectory(at: Paths.configDir, withIntermediateDirectories: true,
                                                 attributes: [.posixPermissions: 0o700])
-        let path = directory.appendingPathComponent(filename)
         let descriptor = Darwin.open(path.path, O_CREAT | O_RDWR, 0o600)
         guard descriptor >= 0 else {
             throw HiDPIError("Cannot open lock file: \(path.path)")

@@ -5,35 +5,30 @@ import HidiPiCore
 import CoreGraphics
 
 struct DisplayService {
-    /// macos.snapshot: the full state of all online displays.
-    func snapshot(allowEmpty: Bool = false) throws -> BackupSnapshot {
+    /// macos.snapshot: the full state of all online displays, validated before it is
+    /// handed out — every snapshot in circulation is a valid rollback reference.
+    func snapshot(allowEmpty: Bool = false) throws -> DisplayState {
         var displays: [DisplaySnapshot] = []
         for display in try DisplayIO.onlineIDs() {
             let bounds = CGDisplayBounds(display)
-            let size = CGDisplayScreenSize(display)
             displays.append(DisplaySnapshot(
                 id: display,
                 uuid: try DisplayUUID.string(for: display),
                 vendor: CGDisplayVendorNumber(display),
                 model: CGDisplayModelNumber(display),
-                serial: CGDisplaySerialNumber(display),
-                builtin: CGDisplayIsBuiltin(display) != 0,
                 main: CGDisplayIsMain(display) != 0,
                 mirrorOf: CGDisplayMirrorsDisplay(display),
                 inMirrorSet: CGDisplayIsInMirrorSet(display) != 0,
                 origin: [Int(bounds.origin.x), Int(bounds.origin.y)],
-                millimeters: [size.width, size.height],
                 mode: DisplayIO.currentMode(display)))
         }
         guard !displays.isEmpty || allowEmpty else {
             throw HiDPIError("No online displays found. Run on this machine's logged-in desktop; "
                 + "sandboxed/SSH sessions may not reach WindowServer.")
         }
-        if displays.isEmpty {
-            return BackupSnapshot(headlessCreated: Backup.timestamp(), macos: Backup.macosVersion(),
-                                  systemFallback: nil)
-        }
-        return BackupSnapshot(created: Backup.timestamp(), macos: Backup.macosVersion(), displays: displays)
+        let state = DisplayState(displays: displays)
+        try state.validate()
+        return state
     }
 
     /// macos.pump / wait_until: pumps the run loop while waiting for the predicate to hold.
@@ -68,8 +63,7 @@ struct DisplayService {
 
     /// macos.restore: resolve by UUID, pre-check every display, then restore mode/layout/
     /// mirroring in a single transaction and verify.
-    func restore(_ snapshot: BackupSnapshot) throws {
-        if snapshot.schema == 2, snapshot.headless == true, snapshot.displays.isEmpty { return }
+    func restore(_ state: DisplayState) throws {
         let live = try Dictionary(uniqueKeysWithValues: DisplayIO.onlineIDs().map {
             (try DisplayUUID.string(for: $0), $0)
         })
@@ -77,7 +71,7 @@ struct DisplayService {
         // (it changes across reboots). CGDisplayMode references are held by the array
         // (CF bridging +0), no manual release needed.
         var entries: [(id: CGDirectDisplayID, mode: CGDisplayMode, saved: DisplaySnapshot)] = []
-        for saved in snapshot.displays {
+        for saved in state.displays {
             guard let display = live[saved.uuid] else {
                 throw HiDPIError("Display \(saved.uuid) from the snapshot is not connected; reconnect it and retry.")
             }
@@ -139,11 +133,10 @@ struct DisplayService {
     }
 
     /// virtual.restore_connected: restore only displays still online.
-    func restoreConnected(_ snapshot: BackupSnapshot) throws {
-        guard snapshot.schema != 2 else { return }
+    func restoreConnected(_ state: DisplayState) throws {
         let live = Set(try DisplayIO.onlineIDs().map { try DisplayUUID.string(for: $0) })
-        let connected = snapshot.displays.filter { live.contains($0.uuid) }
-        if connected.count != snapshot.displays.count {
+        let connected = state.displays.filter { live.contains($0.uuid) }
+        if connected.count != state.displays.count {
             NSLog("hidipi: some original displays are disconnected; their settings cannot be restored.")
         }
         guard !connected.isEmpty else { return }
@@ -151,7 +144,7 @@ struct DisplayService {
         if connected.contains(where: { $0.mirrorOf != 0 && !ids.contains($0.mirrorOf) }) {
             throw HiDPIError("The original mirror set is incomplete; reconnect the original displays.")
         }
-        var partial = snapshot
+        var partial = state
         partial.displays = connected
         try restore(partial)
     }

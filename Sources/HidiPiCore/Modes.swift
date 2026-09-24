@@ -1,39 +1,43 @@
 /// Port of hidipi/src/hidipi/modes.py: pure display-mode selection, comparison and size parsing.
 import Foundation
 
-/// A display mode description; fields match the Python backup JSON exactly (see encoding keys in Backup.swift).
-public struct ModeInfo: Equatable, Sendable, Codable {
+/// A display mode description; field names mirror the Python version's model.
+public struct ModeInfo: Equatable, Sendable {
     public var width: Int
     public var height: Int
     public var pixelWidth: Int
     public var pixelHeight: Int
     public var hz: Double
     public var modeID: UInt32
-    public var flags: UInt32
     public var usable: Bool
 
     public init(width: Int, height: Int, pixelWidth: Int, pixelHeight: Int,
-                hz: Double, modeID: UInt32 = 0, flags: UInt32 = 0, usable: Bool = true) {
+                hz: Double, modeID: UInt32 = 0, usable: Bool = true) {
         self.width = width; self.height = height
         self.pixelWidth = pixelWidth; self.pixelHeight = pixelHeight
-        self.hz = hz; self.modeID = modeID; self.flags = flags; self.usable = usable
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case width, height
-        case pixelWidth = "pixel_width", pixelHeight = "pixel_height"
-        case hz, usable, flags
-        case modeID = "mode_id"
+        self.hz = hz; self.modeID = modeID; self.usable = usable
     }
 }
 
 public enum Modes {
+    /// Rates within 0.6 Hz count as equal everywhere (the modeMatches tolerance).
+    private static func closeRate(_ a: Double, _ b: Double) -> Bool {
+        abs(a - b) < 0.6
+    }
+
+    /// The ordering shared by chooseMode and hidpiChoices: closeness to the current
+    /// refresh rate first, then the higher rate.
+    private static func preferred(_ a: ModeInfo, over b: ModeInfo, current: ModeInfo) -> Bool {
+        let aOff = !closeRate(a.hz, current.hz), bOff = !closeRate(b.hz, current.hz)
+        return aOff != bOff ? !aOff : a.hz > b.hz
+    }
+
     /// modes.mode_matches: identical size and pixels, refresh rate within 0.6 Hz.
     public static func modeMatches(_ actual: ModeInfo?, _ expected: ModeInfo) -> Bool {
         guard let a = actual else { return false }
         return a.width == expected.width && a.height == expected.height
             && a.pixelWidth == expected.pixelWidth && a.pixelHeight == expected.pixelHeight
-            && abs(a.hz - expected.hz) < 0.6
+            && closeRate(a.hz, expected.hz)
     }
 
     /// modes.is_hidpi: pixels rendered at 2x or more of the logical size.
@@ -57,7 +61,7 @@ public enum Modes {
                                   current: ModeInfo, refresh: Double? = nil) throws -> ModeInfo {
         let candidates = modes.filter {
             $0.usable && isHiDPI($0) && ($0.width, $0.height) == size
-                && (refresh == nil || abs($0.hz - refresh!) < 0.6)
+                && (refresh == nil || closeRate($0.hz, refresh!))
         }
         guard !candidates.isEmpty else {
             var requested = "\(size.0)×\(size.1)"
@@ -65,12 +69,7 @@ public enum Modes {
             throw HiDPIError("No HiDPI mode available for \(requested); settings unchanged. "
                 + "Run list to pick an existing mode. This tool does not fabricate display configurations.")
         }
-        // Python key (refresh-rate mismatch, -refresh-rate) ordering: compare match first, then higher rate.
-        return candidates.min {
-            let l = (abs($0.hz - current.hz) >= 0.6, -$0.hz)
-            let r = (abs($1.hz - current.hz) >= 0.6, -$1.hz)
-            return l.0 != r.0 ? l.0 == false : l.1 < r.1
-        }!
+        return candidates.min { preferred($0, over: $1, current: current) }!
     }
 
     /// virtual.mode_matches: same dimensions/pixels as modeMatches, but skips the refresh-rate
@@ -85,19 +84,13 @@ public enum Modes {
     }
 
     /// list_displays menu dedup: keep one usable HiDPI mode per logical size — prefer the one
-    /// matching the current refresh rate (±0.6 Hz), otherwise the highest rate within the same
-    /// class; results sorted by size ascending, independent of input order.
+    /// matching the current refresh rate, otherwise the highest rate within the same class;
+    /// results sorted by size ascending, independent of input order.
     public static func hidpiChoices(_ modes: [ModeInfo], current: ModeInfo) -> [ModeInfo] {
-        // Same ordering as chooseMode: refresh-rate closeness first, then higher rate
-        // (this toolchain has no tuple comparison, so compare components individually).
-        func preferred(_ a: ModeInfo, over b: ModeInfo) -> Bool {
-            let aOff = abs(a.hz - current.hz) >= 0.6, bOff = abs(b.hz - current.hz) >= 0.6
-            return aOff != bOff ? !aOff : a.hz > b.hz
-        }
         var best: [String: ModeInfo] = [:]
         for mode in modes where mode.usable && isHiDPI(mode) {
             let key = "\(mode.width)x\(mode.height)"
-            if let existing = best[key], !preferred(mode, over: existing) { continue }
+            if let existing = best[key], !preferred(mode, over: existing, current: current) { continue }
             best[key] = mode
         }
         return best.values.sorted { ($0.width, $0.height) < ($1.width, $1.height) }

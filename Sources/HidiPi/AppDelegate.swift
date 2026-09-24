@@ -61,27 +61,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.delegate = self
         statusItem.menu = menu
         registerReconfigurationCallback()
-        rebuild(menu)
+        // The menu renders on first open (menuWillOpen); no upfront build needed.
         // Login-autostart path: rebuild the virtual display from the recorded preference
-        // (after the main loop is up and running).
+        // once the main loop is up.
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            if let error = self.state.restorePreferredVirtual() {
+            do {
+                if try self.state.restorePreferredVirtual(), let menu = self.statusItem.menu {
+                    self.rebuild(menu)
+                }
+            } catch {
                 self.alert("Virtual Display Auto-Rebuild Failed",
                     "\(error)\n\nYou can retry from the menu. The preference record is kept at "
                     + "\(VirtualPreference.url.path).")
             }
-            if let menu = self.statusItem.menu { self.rebuild(menu) }
         }
     }
 
+    /// Coalesces reconfiguration storms: CG fires many events per display transaction
+    /// (and our own operations trigger them mid-flight), so at most one state-sync pass
+    /// is ever pending on the main queue.
+    private var stateSyncPending = false
+
     private func onDisplayReconfiguration() {
+        guard !stateSyncPending else { return }
+        stateSyncPending = true
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
+            self.stateSyncPending = false
             // The modified display went away: restore the still-connected ones and clear
             // state; the app stays alive. On failure, state is kept (quit retries it) — log it.
-            if let id = self.state.modifiedDisplayID,
-               (try? DisplayIO.onlineIDs())?.contains(id) == false {
+            if let id = self.state.modifiedDisplayID, !DisplayIO.isOnline(id) {
                 do {
                     try self.state.restoreOriginalQuietly()
                 } catch {
@@ -92,7 +102,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // The virtual display vanished unexpectedly: clear runtime state but keep the
             // preference record so the next login still rebuilds it.
             if let controller = self.state.virtualController,
-               (try? DisplayIO.onlineIDs())?.contains(controller.displayID) == false {
+               !DisplayIO.isOnline(controller.displayID) {
                 do {
                     try self.state.removeVirtual(clearPreference: false)
                 } catch {
@@ -126,7 +136,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         })
     }
 
-    private func appendStatus(_ menu: NSMenu, snapshot: BackupSnapshot?) {
+    private func appendStatus(_ menu: NSMenu, snapshot: DisplayState?) {
         var text = "No display changes active"
         if state.virtualActive, let size = state.virtualSize {
             text = "Virtual display active: \(size.0)×\(size.1), HiDPI"
@@ -139,7 +149,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         addDisabled(menu, text)
     }
 
-    private func appendPhysicalSections(_ menu: NSMenu, snapshot: BackupSnapshot?) {
+    private func appendPhysicalSections(_ menu: NSMenu, snapshot: DisplayState?) {
         guard let displays = snapshot?.displays, !displays.isEmpty else {
             addDisabled(menu, "No online displays detected")
             return
@@ -205,7 +215,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             } catch {
                 self.alert("Login Item", String(describing: error))
             }
-            if let menu = self.statusItem.menu { self.rebuild(menu) }
+            // No rebuild needed: the menu re-renders on next open (menuWillOpen).
         }
         menu.addItem(item)
     }
@@ -214,15 +224,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showAbout() {
         NSApp.activate(ignoringOtherApps: true)
-        var options: [NSApplication.AboutPanelOptionKey: Any] = [.applicationName: "HidiPi"]
-        if let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String {
-            options[.version] = version
-        }
-        options[.credits] = NSAttributedString(
+        // Name and version come from the bundle's Info.plist; only the credits are custom.
+        NSApp.orderFrontStandardAboutPanel(options: [.credits: NSAttributedString(
             string: "Menu-bar HiDPI control for physical and virtual displays.\n"
                 + "https://github.com/unfallenwill/hidipi",
-            attributes: [.font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)])
-        NSApp.orderFrontStandardAboutPanel(options: options)
+            attributes: [.font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)])])
     }
 
     // MARK: - Action execution and error presentation
@@ -246,7 +252,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if case .failure(let error) = outcome {
             alert("Operation Failed", String(describing: error))
         }
-        if let menu = statusItem.menu { rebuild(menu) }
+        // No rebuild needed: invoking an item dismisses the menu, and the next open
+        // re-renders via menuWillOpen.
     }
 
     // MARK: - Small helpers

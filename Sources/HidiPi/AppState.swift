@@ -11,13 +11,12 @@ final class AppState {
     private(set) var lock: OperationLock?
 
     // —— Physical display modification state ——
-    private(set) var originalSnapshot: BackupSnapshot?   // Full snapshot from before the first modification
+    private(set) var originalSnapshot: DisplayState?   // From before the first modification
     private(set) var modifiedDisplayID: CGDirectDisplayID?
-    private(set) var modifiedUUID: String?
 
     // —— Virtual display state ——
     private(set) var virtualController: VirtualDisplayController?
-    private(set) var virtualOriginal: BackupSnapshot?
+    private(set) var virtualOriginal: DisplayState?
     private(set) var virtualSize: (Int, Int)?
 
     var physicalModified: Bool { originalSnapshot != nil }
@@ -39,7 +38,7 @@ final class AppState {
 
     /// Acquires at startup the operation lock mutual with the Python version.
     func acquireLock() throws {
-        lock = try OperationLock(filename: "operation.lock")
+        lock = try OperationLock()
     }
 
     // MARK: - Physical HiDPI (port of display.enable_hidpi, minus the preview phase)
@@ -58,14 +57,12 @@ final class AppState {
             throw HiDPIError("Cannot read the original mode, so no safe rollback is possible; cancelled.")
         }
         if Modes.modeMatches(current, wanted) { return }   // already in that mode
+        // snapshot() hands out validated states — this is the rollback reference.
         let original = try service.snapshot()
-        // The snapshot is the rollback reference — validate it before touching any display.
-        try Backup.validate(original)
         if originalSnapshot == nil {
             originalSnapshot = original
         }
         modifiedDisplayID = target.id
-        modifiedUUID = target.uuid
         do {
             try service.setMode(target.id, expected: wanted)
             try service.waitUntil(timeout: 5, "The system did not switch to the requested HiDPI mode; rolling back") {
@@ -87,7 +84,6 @@ final class AppState {
         defer { operationInProgress = false }
         try VirtualDisplayController.validateOptions(size: size, refresh: 60)
         let original = try VirtualDisplay.captureOriginal(service)
-        try Backup.validate(original)
         let controller = VirtualDisplayController(service: service)
         do {
             let id = try controller.start(size: size, refresh: 60)
@@ -104,12 +100,10 @@ final class AppState {
         }
     }
 
-    /// clearPreference: true when the user explicitly removes (clears the desired state);
-    /// false on unexpected-disappearance cleanup (keeps the record so the next login rebuilds).
-    func removeVirtual(clearPreference: Bool = true) throws {
+    /// Shared virtual teardown: close the display, drop state, optionally clear the
+    /// preference record, then restore the captured original.
+    private func dismantleVirtual(clearPreference: Bool) throws {
         guard let controller = virtualController else { return }
-        try beginOperation()
-        defer { operationInProgress = false }
         virtualController = nil
         controller.close()
         let original = virtualOriginal
@@ -121,19 +115,25 @@ final class AppState {
         }
     }
 
-    /// Rebuilds the virtual display from the recorded preference after login launch;
-    /// silently skipped when no record exists or one is already running.
-    /// Returns nil when nothing to do / rebuilt; non-nil on failure (caller may offer retry).
-    @discardableResult
-    func restorePreferredVirtual() -> Error? {
-        guard virtualController == nil, let size = VirtualPreference.load() else { return nil }
+    /// clearPreference: true when the user explicitly removes (clears the desired state);
+    /// false on unexpected-disappearance cleanup (keeps the record so the next login rebuilds).
+    func removeVirtual(clearPreference: Bool = true) throws {
+        try beginOperation()
+        defer { operationInProgress = false }
+        try dismantleVirtual(clearPreference: clearPreference)
+    }
+
+    /// Rebuilds the virtual display from the recorded preference after login launch.
+    /// Returns true when a rebuild happened; throws on failure (caller may offer retry).
+    func restorePreferredVirtual() throws -> Bool {
+        guard virtualController == nil, let size = VirtualPreference.load() else { return false }
         NSLog("hidipi: virtual display preference found, rebuilding %@.", "\(size.0)×\(size.1)")
         do {
             try createVirtual(size: size)
-            return nil
+            return true
         } catch {
             NSLog("hidipi: automatic rebuild failed: %@", String(describing: error))
-            return error
+            throw error
         }
     }
 
@@ -147,27 +147,14 @@ final class AppState {
         }
         originalSnapshot = nil
         modifiedDisplayID = nil
-        modifiedUUID = nil
     }
 
     /// Full cleanup before quitting; on failure the caller decides whether to quit anyway
     /// (physical mode changes still auto-revert on process exit via the app-only scope).
+    /// The preference record is kept so the next login rebuilds the virtual display.
     func teardown() throws {
-        if let controller = virtualController {
-            virtualController = nil
-            controller.close()
-            if let original = virtualOriginal {
-                try service.restoreConnected(original)
-            }
-            virtualOriginal = nil
-            virtualSize = nil
-        }
-        if let original = originalSnapshot {
-            try service.restoreConnected(original)
-            originalSnapshot = nil
-            modifiedDisplayID = nil
-            modifiedUUID = nil
-        }
+        try dismantleVirtual(clearPreference: false)
+        try restoreOriginalQuietly()
         lock = nil
     }
 

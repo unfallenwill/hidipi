@@ -14,8 +14,12 @@ one menu to enable HiDPI, everything restored automatically on quit.
 Command Line Tools only (no Xcode needed), macOS 13+ / Apple Silicon:
 
 ```sh
-scripts/build-app.sh        # produces dist/HidiPi-<version>.dmg
+scripts/build-app.sh        # produces dist/hidipi-<version>-<arch>.dmg
 ```
+
+DMG filenames are lowercase and include the executable architecture, for example
+`hidipi-0.3.5-arm64.dmg`. Architecture labels are `arm64`, `x86_64`, or `universal`
+(both); the current release supports Apple Silicon only.
 
 Open the DMG and drag HidiPi.app into Applications. You can also run `build/HidiPi.app` directly.
 

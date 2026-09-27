@@ -12,6 +12,17 @@ readonly VERSION="${HIDIPI_VERSION:-0.3.5}"
 echo "▸ swift build -c release"
 swift build -c release
 
+# Label the artifact from the compiled executable, not the build host.
+readonly BINARY_ARCHS="$(lipo -archs .build/release/HidiPi)"
+case "$BINARY_ARCHS" in
+  arm64) ARTIFACT_ARCH="arm64" ;;
+  x86_64) ARTIFACT_ARCH="x86_64" ;;
+  "arm64 x86_64"|"x86_64 arm64") ARTIFACT_ARCH="universal" ;;
+  *) echo "Unsupported executable architectures: $BINARY_ARCHS" >&2; exit 1 ;;
+esac
+readonly ARTIFACT_ARCH
+readonly DMG_NAME="hidipi-${VERSION:l}-${ARTIFACT_ARCH}.dmg"
+
 echo "▸ Render iconset → icns"
 ICONSET="build/AppIcon.iconset"
 rm -rf "$ICONSET"
@@ -55,7 +66,7 @@ mkdir -p "$DMG_DIR" dist
 cp -R "build/${APP_NAME}.app" "$DMG_DIR/"
 ln -sfn /Applications "$DMG_DIR/Applications"
 hdiutil create -volname "${APP_NAME}" -fs HFS+ -format UDZO \
-    -srcfolder "$DMG_DIR" -ov "dist/${APP_NAME}-${VERSION}.dmg"
+    -srcfolder "$DMG_DIR" -ov "dist/${DMG_NAME}"
 
-echo "✓ Done: dist/${APP_NAME}-${VERSION}.dmg"
+echo "✓ Done: dist/${DMG_NAME}"
 echo "  Install: open the DMG and drag ${APP_NAME}.app to Applications."

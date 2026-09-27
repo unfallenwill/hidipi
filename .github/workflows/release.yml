@@ -1,7 +1,7 @@
 # Triggered by pushing a v<version> tag: test → package DMG → attest provenance → publish
-# a GitHub Release. The DMG version comes from the tag (v0.3.2 → HidiPi-0.3.2.dmg), passed
+# a GitHub Release. The DMG version comes from the tag (v0.3.5 → hidipi-0.3.5-arm64.dmg), passed
 # to the packaging script via HIDIPI_VERSION.
-# Downloaders can verify provenance: gh attestation verify HidiPi-<version>.dmg -R <this repo>
+# Downloaders can verify provenance: gh attestation verify hidipi-<version>-<arch>.dmg -R <this repo>
 name: release
 
 on:

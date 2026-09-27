@@ -18,15 +18,19 @@ struct MenuState {
     var virtualActive: Bool
     var virtualSize: (Int, Int)?
     var physicalModified: Bool
+    var restorationPending: Bool
     var modifiedDisplayID: UInt32?
     var loginItemEnabled: Bool
+    var optionsByDisplay: [UInt32: [ModeOption]]
 
     init(snapshot: DisplayState? = nil, virtualActive: Bool = false, virtualSize: (Int, Int)? = nil,
-         physicalModified: Bool = false, modifiedDisplayID: UInt32? = nil,
-         loginItemEnabled: Bool = false) {
+         physicalModified: Bool = false, restorationPending: Bool = false, modifiedDisplayID: UInt32? = nil,
+         loginItemEnabled: Bool = false, optionsByDisplay: [UInt32: [ModeOption]] = [:]) {
         self.snapshot = snapshot; self.virtualActive = virtualActive; self.virtualSize = virtualSize
+        self.restorationPending = restorationPending
         self.physicalModified = physicalModified; self.modifiedDisplayID = modifiedDisplayID
         self.loginItemEnabled = loginItemEnabled
+        self.optionsByDisplay = optionsByDisplay
     }
 }
 
@@ -49,13 +53,14 @@ struct MenuModel {
     let loginItemChecked: Bool
 
     /// Ports the former appendStatus / appendPhysicalSections / appendVirtualSection logic.
-    /// hidpiOptions is injected so tests can supply fixtures instead of CG enumeration.
-    static func build(_ state: MenuState,
-                      hidpiOptions: (DisplaySnapshot) -> [ModeOption] = AppState.hidpiOptions) -> MenuModel {
+    /// Mode choices are supplied by the caller; building a menu never queries the system.
+    static func build(_ state: MenuState) -> MenuModel {
         var statusText = "No display changes active"
-        if state.virtualActive, let size = state.virtualSize {
+        if state.restorationPending {
+            statusText = "Restore incomplete; quit to retry"
+        } else if state.virtualActive, let size = state.virtualSize {
             statusText = "Virtual display active: \(size.0)×\(size.1), HiDPI"
-        } else if let id = state.modifiedDisplayID, let current = DisplayIO.currentMode(id) {
+        } else if let id = state.modifiedDisplayID, let current = state.snapshot?.displays.first(where: { $0.id == id })?.mode {
             statusText = Modes.describe(current)
         } else if let only = state.snapshot?.displays.first, state.snapshot?.displays.count == 1 {
             statusText = Modes.describe(only.mode)
@@ -68,12 +73,14 @@ struct MenuModel {
                 let title = "Display \(display.id) (\(display.main ? "main" : "secondary"))"
                 var hint: String?
                 var options: [ModeOption] = []
-                if state.virtualActive {
+                if state.restorationPending {
+                    hint = "Restore incomplete; quit to retry"
+                } else if state.virtualActive {
                     hint = "Remove the virtual display first"
                 } else if display.inMirrorSet {
                     hint = "Mirroring active; disable it in System Settings first"
                 } else {
-                    let available = hidpiOptions(display)
+                    let available = state.optionsByDisplay[display.id] ?? []
                     if available.isEmpty {
                         hint = "No HiDPI modes available"
                     } else {
@@ -95,9 +102,11 @@ struct MenuModel {
             virtualEnabled = true
             createSizes = []
         } else {
-            virtualTitle = state.physicalModified
+            virtualTitle = state.restorationPending
+                ? "Virtual Display (restore incomplete)"
+                : state.physicalModified
                 ? "Virtual Display (restore physical changes first)" : "Virtual Display"
-            virtualEnabled = !state.physicalModified
+            virtualEnabled = !state.physicalModified && !state.restorationPending
             createSizes = [(1920, 1080), (2560, 1440)]
         }
 

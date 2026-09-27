@@ -102,11 +102,11 @@ enum VirtualBridge {
 /// virtual.VirtualDisplay: holding the strong reference keeps the virtual display alive;
 /// releasing it tears it down.
 final class VirtualDisplayController {
-    private let service: DisplayService
+    private let service: any DisplayServicing
     private var display: AnyObject?
     private(set) var displayID: CGDirectDisplayID = 0
 
-    init(service: DisplayService) { self.service = service }
+    init(service: any DisplayServicing) { self.service = service }
 
     #if arch(arm64)
     /// The constraints of virtual.validate_options.
@@ -158,21 +158,21 @@ final class VirtualDisplayController {
         }
 
         try service.waitUntil(timeout: 10, "The virtual display did not come online in time") {
-            DisplayIO.isOnline(id) && DisplayIO.currentMode(id) != nil
+            service.isOnline(id) && service.currentMode(id) != nil
         }
         let expected = ModeInfo(width: Int(w), height: Int(h), pixelWidth: Int(w) * 2,
                                 pixelHeight: Int(h) * 2, hz: refresh)
-        let actual = DisplayIO.currentMode(id)!
+        let actual = service.currentMode(id)!
         NSLog("hidipi: initial virtual mode from macOS: %@", Modes.describe(actual))
         // virtual.mode_matches: hz may be briefly missing during startup; that must not
         // take down the virtual display.
         if !Modes.modeMatchesLenient(actual, expected) {
-            let wanted = try Modes.chooseMode(DisplayIO.allModes(id).map(DisplayIO.info),
+            let wanted = try Modes.chooseMode(service.allModes(id),
                                               size: (Int(w), Int(h)), current: actual, refresh: refresh)
             try service.setMode(id, expected: wanted)
         }
         try service.waitUntil(timeout: 5, "Virtual display created, but macOS did not provide the requested HiDPI mode") {
-            Modes.modeMatchesLenient(DisplayIO.currentMode(id), expected)
+            Modes.modeMatchesLenient(service.currentMode(id), expected)
         }
         return id
     }
@@ -189,7 +189,7 @@ final class VirtualDisplayController {
         let id = displayID
         displayID = 0
         try? service.waitUntil(timeout: 8, "The virtual display did not go away in time; it will be released when the process exits") {
-            !DisplayIO.isOnline(id)
+            !service.isOnline(id)
         }
     }
 }
@@ -197,7 +197,7 @@ final class VirtualDisplayController {
 enum VirtualDisplay {
     /// virtual.capture_original: filter out macOS's transient fallback desktop (unkn/virt);
     /// never treat it as EDID hardware to replay. An empty result is the headless case.
-    static func captureOriginal(_ service: DisplayService) throws -> DisplayState {
+    static func captureOriginal(_ service: any DisplayServicing) throws -> DisplayState {
         let stable = try service.snapshot(allowEmpty: true).displays.filter {
             !($0.vendor == 0x756E6B6E && $0.model == 0x76697274)
         }

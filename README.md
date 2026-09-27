@@ -80,6 +80,16 @@ Structure: `Sources/HidiPiCore` (pure logic: mode selection / snapshot validatio
 `Sources/HidiPiIcon` (icon geometry, shared by the status bar and the icns),
 `Sources/render-icon` (icns asset generation), `scripts/build-app.sh` (packaging).
 
+Display operations use one session state (idle / physical / virtual / pending restore).
+A failed restore retains its snapshot for a retry on quit; the menu blocks new changes
+while a closed virtual display's original desktop still needs restoring. Display-change
+events are coalesced and processed only after the current operation finishes.
+
+`DisplayEnvironment.swift` defines injectable display operations, virtual controllers,
+and preference storage. `OperationFlowTests` uses these boundaries and a controlled
+callback queue to test failures and reentrancy without changing real displays. Menu
+models consume collected snapshots and mode choices without reading system state.
+
 Known quirk: the local swift 6.4-dev toolchain occasionally hits
 `TestingMacros plugin not found` (even after a clean); passing the plugin path explicitly
 works:

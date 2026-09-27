@@ -1,186 +1,238 @@
-/// App state and all operation flows (enable / virtual / quit).
-/// Follows the Python version's semantics: only one modification at a time (physical OR
-/// virtual, enforced by entry guards rather than menu disabling); restored on quit or
-/// removal from in-memory snapshots. All methods must be called on the main thread.
+/// Owns display sessions and serializes user operations with display-change recovery.
+/// Callers enter on the main thread; system callbacks are dispatched there by AppDelegate.
 import Foundation
 import HidiPiCore
 import CoreGraphics
 
 final class AppState {
-    let service: DisplayService
+    private enum Session {
+        case idle
+        case physical(original: DisplayState, displayID: UInt32?)
+        case virtual(controller: any VirtualDisplayControlling, original: DisplayState, size: (Int, Int)?)
+        // The display is already closed, but the original desktop still needs restoring.
+        case recovery(DisplayState)
+    }
+
+    let service: any DisplayServicing
+    private let preferences: VirtualPreferenceStore
+    private let makeVirtual: () -> any VirtualDisplayControlling
+    private let schedule: (@escaping () -> Void) -> Void
+    private var session: Session = .idle
     private(set) var lock: OperationLock?
+    private(set) var operationInProgress = false
+    private var reconciliationPending = false
+    private var reconciliationScheduled = false
+    var onReconciled: () -> Void = {}
+    var onRecoveryError: (Error) -> Void = {
+        NSLog("hidipi: display recovery failed: %@ (state kept, retried on quit)", String(describing: $0))
+    }
 
-    // —— Physical display modification state ——
-    private(set) var originalSnapshot: DisplayState?   // From before the first modification
-    private(set) var modifiedDisplayID: CGDirectDisplayID?
-
-    // —— Virtual display state ——
-    private(set) var virtualController: VirtualDisplayController?
-    private(set) var virtualOriginal: DisplayState?
-    private(set) var virtualSize: (Int, Int)?
-
-    var physicalModified: Bool { originalSnapshot != nil }
+    var physicalModified: Bool {
+        if case .physical = session { return true }
+        return false
+    }
+    var modifiedDisplayID: UInt32? {
+        if case .physical(_, let id) = session { return id }
+        return nil
+    }
+    var virtualController: (any VirtualDisplayControlling)? {
+        if case .virtual(let controller, _, _) = session { return controller }
+        return nil
+    }
     var virtualActive: Bool { virtualController != nil }
+    var virtualSize: (Int, Int)? {
+        if case .virtual(_, _, let size) = session { return size }
+        return nil
+    }
+    var restorationPending: Bool {
+        if case .recovery = session { return true }
+        return false
+    }
 
-    // —— Reentrancy guard ——
-    // waitUntil pumps the run loop and NSAlert.runModal nests event loops, so menu actions
-    // can fire while an operation is in flight; this flag keeps "one modification at a time"
-    // from depending on menu disabling.
-    private var operationInProgress = false
+    init(service: any DisplayServicing = DisplayService(),
+         originalSnapshot: DisplayState? = nil,
+         modifiedDisplayID: UInt32? = nil,
+         virtualController: (any VirtualDisplayControlling)? = nil,
+         virtualOriginal: DisplayState? = nil,
+         virtualSize: (Int, Int)? = nil,
+         preferences: VirtualPreferenceStore = VirtualPreferenceStore(),
+         makeVirtual: (() -> any VirtualDisplayControlling)? = nil,
+         schedule: @escaping (@escaping () -> Void) -> Void = { DispatchQueue.main.async(execute: $0) }) {
+        self.service = service
+        self.preferences = preferences
+        self.makeVirtual = makeVirtual ?? { VirtualDisplayController(service: service) }
+        self.schedule = schedule
+        if let controller = virtualController {
+            session = .virtual(controller: controller,
+                               original: virtualOriginal ?? DisplayState(displays: []), size: virtualSize)
+        } else if let original = originalSnapshot {
+            session = .physical(original: original, displayID: modifiedDisplayID)
+        }
+    }
 
-    /// Entry mutex for mutating operations: rejects reentry while one is in flight.
-    private func beginOperation() throws {
+    private func withOperation<T>(_ body: () throws -> T) throws -> T {
         guard !operationInProgress else {
             throw HiDPIError("The previous operation is still in progress; try again shortly.")
         }
         operationInProgress = true
+        defer {
+            operationInProgress = false
+            scheduleReconciliationIfNeeded()
+        }
+        return try body()
     }
 
-    /// Test seam: fixture states for guard and cleanup paths; production always starts
-    /// clean (AppDelegate uses the default).
-    init(service: DisplayService = DisplayService(),
-         originalSnapshot: DisplayState? = nil,
-         modifiedDisplayID: UInt32? = nil,
-         virtualController: VirtualDisplayController? = nil,
-         virtualOriginal: DisplayState? = nil,
-         virtualSize: (Int, Int)? = nil) {
-        self.service = service
-        self.originalSnapshot = originalSnapshot
-        self.modifiedDisplayID = modifiedDisplayID
-        self.virtualController = virtualController
-        self.virtualOriginal = virtualOriginal
-        self.virtualSize = virtualSize
-    }
+    func acquireLock() throws { lock = try OperationLock() }
 
-    /// Acquires at startup the operation lock mutual with the Python version.
-    func acquireLock() throws {
-        lock = try OperationLock()
-    }
-
-    // MARK: - Physical HiDPI (port of display.enable_hidpi, minus the preview phase)
-
-    /// target comes from a freshly rebuilt snapshot; wanted is the menu-selected HiDPI mode.
     func enableHiDPI(on target: DisplaySnapshot, wanted: ModeInfo) throws {
-        guard !virtualActive else {
-            throw HiDPIError("A virtual display is active; remove it before changing physical displays.")
-        }
-        try beginOperation()
-        defer { operationInProgress = false }
-        guard !target.inMirrorSet else {
-            throw HiDPIError("The target display is mirroring. Disable mirroring in System Settings first.")
-        }
-        guard let current = target.mode else {
-            throw HiDPIError("Cannot read the original mode, so no safe rollback is possible; cancelled.")
-        }
-        if Modes.modeMatches(current, wanted) { return }   // already in that mode
-        // snapshot() hands out validated states — this is the rollback reference.
-        let original = try service.snapshot()
-        if originalSnapshot == nil {
-            originalSnapshot = original
-        }
-        modifiedDisplayID = target.id
-        do {
-            try service.setMode(target.id, expected: wanted)
-            try service.waitUntil(timeout: 5, "The system did not switch to the requested HiDPI mode; rolling back") {
-                Modes.modeMatches(DisplayIO.currentMode(target.id), wanted)
+        try withOperation {
+            guard !virtualActive, !restorationPending else {
+                throw HiDPIError("Remove the virtual display and finish restoring before changing physical displays.")
             }
-        } catch {
-            try? restoreOriginalQuietly()
-            throw error
+            guard !target.inMirrorSet else {
+                throw HiDPIError("The target display is mirroring. Disable mirroring in System Settings first.")
+            }
+            guard let current = target.mode else {
+                throw HiDPIError("Cannot read the original mode, so no safe rollback is possible; cancelled.")
+            }
+            if Modes.modeMatches(current, wanted) { return }
+            let fresh = try service.snapshot()
+            let original: DisplayState
+            if case .physical(let saved, _) = session {
+                original = saved
+            } else {
+                original = fresh
+            }
+            session = .physical(original: original, displayID: target.id)
+            do {
+                try service.setMode(target.id, expected: wanted)
+                try service.waitUntil(timeout: 5, "The system did not switch to the requested HiDPI mode; rolling back") {
+                    Modes.modeMatches(service.currentMode(target.id), wanted)
+                }
+            } catch {
+                try rollback(after: error)
+            }
         }
     }
-
-    // MARK: - Virtual display (port of virtual.run)
 
     func createVirtual(size: (Int, Int)) throws {
-        guard !physicalModified else {
-            throw HiDPIError("Physical display changes are not restored yet; exit that change before creating a virtual display.")
+        try withOperation {
+            guard case .idle = session else {
+                throw HiDPIError("A display change is already active or awaiting restore; restore it before creating a virtual display.")
+            }
+            try VirtualDisplayController.validateOptions(size: size, refresh: 60)
+            let original = try VirtualDisplay.captureOriginal(service)
+            let controller = makeVirtual()
+            do {
+                let id = try controller.start(size: size, refresh: 60)
+                try preferences.save(size)
+                // Publish the active session only after all creation steps succeed.
+                session = .virtual(controller: controller, original: original, size: size)
+                NSLog("hidipi: virtual display verified, ID=%u", id)
+            } catch {
+                session = .recovery(original)
+                controller.close()
+                try rollback(after: error)
+            }
         }
-        try beginOperation()
-        defer { operationInProgress = false }
-        try VirtualDisplayController.validateOptions(size: size, refresh: 60)
-        let original = try VirtualDisplay.captureOriginal(service)
-        let controller = VirtualDisplayController(service: service)
-        do {
-            let id = try controller.start(size: size, refresh: 60)
-            NSLog("hidipi: virtual display verified, ID=%u", id)
-            virtualController = controller
-            virtualOriginal = original
-            virtualSize = size
-            // Remember the desired state: rebuilt automatically after restart / login launch.
-            try VirtualPreference.save(size)
-        } catch {
+    }
+
+    /// Keep the rollback reference until restoration succeeds, including after close().
+    private func restoreSession(clearPreference: Bool) throws {
+        switch session {
+        case .idle:
+            return
+        case .virtual(let controller, let original, _):
+            session = .recovery(original)
             controller.close()
-            try? service.restoreConnected(original)
-            throw error
-        }
-    }
-
-    /// Shared virtual teardown: close the display, drop state, optionally clear the
-    /// preference record, then restore the captured original.
-    private func dismantleVirtual(clearPreference: Bool) throws {
-        guard let controller = virtualController else { return }
-        virtualController = nil
-        controller.close()
-        let original = virtualOriginal
-        virtualOriginal = nil
-        virtualSize = nil
-        if clearPreference { VirtualPreference.clear() }
-        if let original {
-            try service.restoreConnected(original)   // failure propagates
-        }
-    }
-
-    /// clearPreference: true when the user explicitly removes (clears the desired state);
-    /// false on unexpected-disappearance cleanup (keeps the record so the next login rebuilds).
-    func removeVirtual(clearPreference: Bool = true) throws {
-        try beginOperation()
-        defer { operationInProgress = false }
-        try dismantleVirtual(clearPreference: clearPreference)
-    }
-
-    /// Rebuilds the virtual display from the recorded preference after login launch.
-    /// Returns true when a rebuild happened; throws on failure (caller may offer retry).
-    func restorePreferredVirtual() throws -> Bool {
-        guard virtualController == nil, let size = VirtualPreference.load() else { return false }
-        NSLog("hidipi: virtual display preference found, rebuilding %@.", "\(size.0)×\(size.1)")
-        do {
-            try createVirtual(size: size)
-            return true
-        } catch {
-            NSLog("hidipi: automatic rebuild failed: %@", String(describing: error))
-            throw error
-        }
-    }
-
-    // MARK: - Quit-time cleanup (the Python version's finally-restore)
-
-    /// Best-effort restore for callback safety nets; if restore throws, state is
-    /// intentionally kept so quit retries it.
-    func restoreOriginalQuietly() throws {
-        if let original = originalSnapshot {
+            if clearPreference { preferences.clear() }
+            try service.restoreConnected(original)
+        case .physical(let original, _), .recovery(let original):
             try service.restoreConnected(original)
         }
-        originalSnapshot = nil
-        modifiedDisplayID = nil
+        session = .idle
     }
 
-    /// Full cleanup before quitting; on failure the caller decides whether to quit anyway
-    /// (physical mode changes still auto-revert on process exit via the app-only scope).
-    /// The preference record is kept so the next login rebuilds the virtual display.
+    private func rollback(after error: Error) throws -> Never {
+        do {
+            try restoreSession(clearPreference: false)
+        } catch let restoreError {
+            throw HiDPIError("\(error)\nRollback also failed: \(restoreError). Original settings are kept for a retry on quit.")
+        }
+        throw error
+    }
+
+    func removeVirtual(clearPreference: Bool = true) throws {
+        try withOperation {
+            guard virtualActive || restorationPending else { return }
+            // Also allow explicit removal after an earlier failed rollback.
+            if clearPreference && restorationPending { preferences.clear() }
+            try restoreSession(clearPreference: clearPreference)
+        }
+    }
+
+    func restorePreferredVirtual() throws -> Bool {
+        guard case .idle = session, let size = preferences.load() else { return false }
+        try createVirtual(size: size)
+        return true
+    }
+
+    func restoreOriginalQuietly() throws {
+        try withOperation {
+            guard physicalModified || restorationPending else { return }
+            try restoreSession(clearPreference: false)
+        }
+    }
+
     func teardown() throws {
-        try dismantleVirtual(clearPreference: false)
-        try restoreOriginalQuietly()
-        lock = nil
+        try withOperation {
+            try restoreSession(clearPreference: false)
+            reconciliationPending = false
+            lock = nil
+        }
     }
 
-    // MARK: - Menu data
+    // Display callbacks only request work. Events arriving inside a pumped run loop are
+    // coalesced and reconciled after the active operation has committed or rolled back.
+    func requestDisplayReconciliation() {
+        reconciliationPending = true
+        scheduleReconciliationIfNeeded()
+    }
 
-    /// The menu version of list_displays: mode enumeration goes through CG; the
-    /// dedup/sorting pure logic lives in Modes.hidpiChoices.
+    private func scheduleReconciliationIfNeeded() {
+        guard reconciliationPending, !operationInProgress, !reconciliationScheduled else { return }
+        reconciliationScheduled = true
+        schedule { [weak self] in
+            guard let self else { return }
+            self.reconciliationScheduled = false
+            guard self.reconciliationPending, !self.operationInProgress else { return }
+            self.reconciliationPending = false
+            do {
+                try self.withOperation {
+                    if let id = self.modifiedDisplayID, !self.service.isOnline(id) {
+                        try self.restoreSession(clearPreference: false)
+                    } else if let controller = self.virtualController,
+                              !self.service.isOnline(controller.displayID) {
+                        try self.restoreSession(clearPreference: false)
+                    }
+                }
+            } catch {
+                self.onRecoveryError(error)
+            }
+            self.onReconciled()
+        }
+    }
+
     static func hidpiOptions(for display: DisplaySnapshot) -> [ModeOption] {
+        modeOptions(for: display, modes: DisplayService().allModes(display.id))
+    }
+
+    func hidpiOptions(for display: DisplaySnapshot) -> [ModeOption] {
+        Self.modeOptions(for: display, modes: service.allModes(display.id))
+    }
+
+    private static func modeOptions(for display: DisplaySnapshot, modes: [ModeInfo]) -> [ModeOption] {
         guard let current = display.mode else { return [] }
-        return Modes.hidpiChoices(DisplayIO.allModes(display.id).map(DisplayIO.info), current: current)
-            .map { ModeOption(display: display, mode: $0) }
+        return Modes.hidpiChoices(modes, current: current).map { ModeOption(display: display, mode: $0) }
     }
 }

@@ -17,7 +17,11 @@ private func display(id: UInt32 = 2, vendor: UInt32 = 1, main: Bool = true,
 
 private func build(_ state: MenuState,
                    options: [ModeOption] = []) -> MenuModel {
-    MenuModel.build(state, hidpiOptions: { _ in options })
+    var state = state
+    for display in state.snapshot?.displays ?? [] {
+        state.optionsByDisplay[display.id] = options
+    }
+    return MenuModel.build(state)
 }
 
 @Test func idleStateShowsPlaceholderStatus() {
@@ -87,11 +91,17 @@ private func build(_ state: MenuState,
     #expect(model.displaySections[0].hint == "No HiDPI modes available")
 }
 
-@Test func modifiedDisplayStatusDescribesItsLiveMode() {
-    guard CGMainDisplayID() != 0 else { return }
-    let model = build(MenuState(modifiedDisplayID: CGMainDisplayID()))
-    #expect(model.statusText != "No display changes active")
-    #expect(model.statusText.contains("rendered"))
+@Test func modifiedDisplayStatusUsesTheSuppliedSnapshot() {
+    let model = build(MenuState(snapshot: DisplayState(displays: [display(), display(id: 3)]),
+                                modifiedDisplayID: 2))
+    #expect(model.statusText == Modes.describe(currentMode))
+}
+
+@Test func pendingRestoreBlocksNewChanges() {
+    let model = build(MenuState(snapshot: DisplayState(displays: [display()]), restorationPending: true))
+    #expect(!model.virtualEnabled)
+    #expect(model.statusText == "Restore incomplete; quit to retry")
+    #expect(model.displaySections[0].hint == "Restore incomplete; quit to retry")
 }
 
 // MARK: - Rendering (NSMenu construction happens on the main thread, like the app)

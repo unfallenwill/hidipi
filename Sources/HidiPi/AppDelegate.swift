@@ -55,6 +55,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     init(state: AppState = AppState()) {
         self.state = state
         super.init()
+        state.onReconciled = { [weak self] in
+            guard let self, let menu = self.statusItem?.menu else { return }
+            self.rebuild(menu)
+        }
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -73,7 +77,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func registerReconfigurationCallback() {
         reconfigurationCallback = { _, _, _ in
-            AppDelegate.shared?.onDisplayReconfiguration()
+            DispatchQueue.main.async {
+                AppDelegate.shared?.onDisplayReconfiguration()
+            }
         }
         if let callback = reconfigurationCallback {
             CGDisplayRegisterReconfigurationCallback(callback, nil)
@@ -117,51 +123,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Coalesces reconfiguration storms: CG fires many events per display transaction
-    /// (and our own operations trigger them mid-flight), so at most one state-sync pass
-    /// is ever pending on the main queue.
-    private var stateSyncPending = false
-
     func onDisplayReconfiguration() {
-        guard !stateSyncPending else { return }
-        stateSyncPending = true
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.stateSyncPending = false
-            // The modified display went away: restore the still-connected ones and clear
-            // state; the app stays alive. On failure, state is kept (quit retries it) — log it.
-            if let id = self.state.modifiedDisplayID, !DisplayIO.isOnline(id) {
-                do {
-                    try self.state.restoreOriginalQuietly()
-                } catch {
-                    NSLog("hidipi: auto-restore after display disconnect failed: %@ (state kept, retried on quit)",
-                          String(describing: error))
-                }
-            }
-            // The virtual display vanished unexpectedly: clear runtime state but keep the
-            // preference record so the next login still rebuilds it.
-            if let controller = self.state.virtualController,
-               !DisplayIO.isOnline(controller.displayID) {
-                do {
-                    try self.state.removeVirtual(clearPreference: false)
-                } catch {
-                    NSLog("hidipi: virtual display cleanup failed: %@ (state kept, retried on quit)",
-                          String(describing: error))
-                }
-            }
-            if let menu = self.statusItem?.menu { self.rebuild(menu) }
-        }
+        state.requestDisplayReconciliation()
     }
 
     // MARK: - Menu rendering
 
     private func currentState() -> MenuState {
-        MenuState(snapshot: try? state.service.snapshot(),
+        let snapshot = try? state.service.snapshot()
+        var options: [UInt32: [ModeOption]] = [:]
+        if !state.virtualActive && !state.restorationPending {
+            for display in snapshot?.displays ?? [] where !display.inMirrorSet && display.vendor != VirtualBridge.vendorID {
+                options[display.id] = state.hidpiOptions(for: display)
+            }
+        }
+        return MenuState(snapshot: snapshot,
                   virtualActive: state.virtualActive,
                   virtualSize: state.virtualSize,
                   physicalModified: state.physicalModified,
+                  restorationPending: state.restorationPending,
                   modifiedDisplayID: state.modifiedDisplayID,
-                  loginItemEnabled: LoginItem.isEnabled)
+                  loginItemEnabled: LoginItem.isEnabled, optionsByDisplay: options)
     }
 
     func rebuild(_ menu: NSMenu) {
